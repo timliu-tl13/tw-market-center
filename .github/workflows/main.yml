@@ -1,0 +1,37 @@
+name: Daily Market Command Center Update
+
+on:
+  schedule:
+    # 台灣時間 18:30 (UTC 10:30) 週一到週五執行
+    - cron: '30 10 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests pandas
+
+      - name: Run Cloud Spider
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: python scripts/fetch_cloud_chip_data.py
+
+      - name: Commit and Push JSON
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "Market Bot"
+          git add public/market_dashboard_data.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto update market data" && git push)
