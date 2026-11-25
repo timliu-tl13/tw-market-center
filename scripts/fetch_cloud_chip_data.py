@@ -89,7 +89,7 @@ def load_existing_json():
     return {}
 
 def main():
-    print("🚀 啟動台股多空戰情指揮中心全自動爬蟲...")
+    print("🚀 啟動台股多空戰情指揮中心全自動爬蟲（FinMind Sponsor 全市場掃描版）...")
     dates = get_recent_trading_dates(110)
     if len(dates) < 20:
         print("❌ 無法取得交易日曆，保留舊資料不覆蓋。")
@@ -164,7 +164,7 @@ def main():
         market_summary["dealer_net"] = round(d_net, 2)
         market_summary["inst_total"] = round(f_net + t_net + d_net, 2)
 
-    # 2. 全市場上市＋上櫃每日收盤行情（含當日均價 = 成交金額 / 成交股數）
+    # 2. 全市場上市＋上櫃每日收盤行情（含當日均價）
     stocks_map = {}
     twse_all = get_json("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL")
     if isinstance(twse_all, list):
@@ -350,7 +350,7 @@ def main():
                 v_tot = stocks_map[code]["v"]
                 dt_map[code] = round(dt_lots / v_tot * 100, 2) if v_tot > 0 else 0.0
 
-    # 5. 籌碼篩選（排除大型權值與金融股，專注動能飆股分點明細）
+    # 5. 籌碼篩選：FinMind Sponsor 解放全市場千張以上動能股（排除大型權值與金融股）
     heavy_exclude = {"2330", "2317", "2454", "2412", "2308", "2382", "3045", "4904", "6505", "1301", "1303", "2002", "1216"}
     candidate_list = sorted(
         [
@@ -362,8 +362,10 @@ def main():
         key=lambda x: x["v"],
         reverse=True
     )
-    max_scan = 180 if FINMIND_TOKEN else 80
+    # Sponsor 額度 6,000次/小時，全市場千張股約 400~650 檔可一次全數掃完
+    max_scan = 700 if FINMIND_TOKEN else 80
     scan_targets = candidate_list[:max_scan]
+    print(f"📊 流動性合格共 {len(candidate_list)} 檔，本次深度分析 {len(scan_targets)} 檔...")
 
     probe_code = scan_targets[0]["c"] if scan_targets else "2303"
     probe_br = fetch_finmind("TaiwanStockTradingDailyReport", data_id=probe_code, start_date=latest_date, end_date=latest_date)
@@ -467,9 +469,10 @@ def main():
                 "bs": bs, "sg": sg, "sit_buy": sit_buy, "sms": sms,
                 "sc": sc, "adv": adv
             })
-            time.sleep(0.1)
+            # Sponsor 每小時 6000 次上限，間隔 0.03 秒約 2 分鐘可掃完整個市場
+            time.sleep(0.03)
 
-    # 6. 當月漲跌幅排行（強勢與弱勢皆嚴格過濾 成交值 > 5,000 萬 = 0.5 億）
+    # 6. 當月漲跌幅排行（強勢與弱勢皆嚴格過濾 成交值 > 5,000 萬）
     m_top_liq = existing_data.get("m_top_liq", [])
     m_bot_liq = existing_data.get("m_bot_liq", [])
     prev_m_map = {x["c"]: x for x in (m_top_liq + m_bot_liq)}
@@ -544,7 +547,7 @@ def main():
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
-    print(f"🎉 更新完成！大盤基準日: {latest_date} | 籌碼基準日: {v7_trade_date}")
+    print(f"🎉 更新完成！大盤基準日: {latest_date} | 籌碼基準日: {v7_trade_date} | 掃描檔數: {len(active_v7)}")
 
 if __name__ == "__main__":
     main()
