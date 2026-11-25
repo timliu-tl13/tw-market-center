@@ -2,8 +2,10 @@ name: Daily Market Command Center Update
 
 on:
   schedule:
-    # 台灣時間 18:30 (UTC 10:30) 週一到週五執行
-    - cron: '30 10 * * 1-5'
+    # 台灣時間平日 (週一至週五) 18:45、20:15、21:30 自動執行 (UTC 10:45, 12:15, 13:30)
+    - cron: '45 10 * * 1-5'
+    - cron: '15 12 * * 1-5'
+    - cron: '30 13 * * 1-5'
   workflow_dispatch:
 
 permissions:
@@ -22,7 +24,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install requests pandas
+        run: pip install requests pandas urllib3
 
       - name: Run Cloud Spider
         env:
