@@ -46,7 +46,6 @@ def fetch_finmind(dataset, data_id="", start_date="", end_date=""):
     params = {"dataset": dataset, "start_date": start_date}
     if data_id:
         params["data_id"] = data_id
-    # 券商分點日報僅支援單日查詢，不可傳入 end_date
     if end_date and dataset != "TaiwanStockTradingDailyReport":
         params["end_date"] = end_date
     if FINMIND_TOKEN:
@@ -54,7 +53,7 @@ def fetch_finmind(dataset, data_id="", start_date="", end_date=""):
 
     for _ in range(3):
         try:
-            resp = requests.get(FINMIND_URL, params=params, timeout=20)
+            resp = requests.get(FINMIND_URL, params=params, timeout=25)
             data = resp.json()
             if data.get("msg") == "success":
                 return pd.DataFrame(data.get("data", []))
@@ -87,7 +86,7 @@ def load_existing_json():
     return {}
 
 def main():
-    print("🚀 啟動台股多空戰情指揮中心全自動爬蟲（FinMind Sponsor 單日分點精準版）...")
+    print("🚀 啟動台股多空戰情指揮中心全自動爬蟲（全市場月漲跌幅＋上櫃金額＋投信零持股首買版）...")
     latest_date, twse_all = get_latest_twse_date()
     if not latest_date:
         end_dt = datetime.now()
@@ -101,7 +100,7 @@ def main():
         return
 
     dt_latest = datetime.strptime(latest_date, "%Y-%m-%d")
-    d60_start = (dt_latest - timedelta(days=95)).strftime("%Y-%m-%d")
+    d60_start = (dt_latest - timedelta(days=115)).strftime("%Y-%m-%d")
     ymd = latest_date.replace("-", "")
     print(f"📅 最新大盤交易日: {latest_date}")
 
@@ -220,42 +219,39 @@ def main():
             {"name": "當日下跌", "count": dn_cnt, "pct": round(dn_cnt / tot_cnt * 100, 2)},
         ]
 
-    # 3. 外資與投信買賣超「金額」TOP 10（億元）
+    # 取得交易日曆（近 115 天）
+    cal_df = fetch_finmind("TaiwanStockPrice", data_id="2330", start_date=d60_start, end_date=latest_date)
+    all_dates = sorted(cal_df["date"].unique().tolist()) if not cal_df.empty else [latest_date]
+    recent_days = all_dates[-5:]
+    prev_trade_date = all_dates[-2] if len(all_dates) >= 2 else latest_date
+
+    # 3. 外資與投信上市櫃買賣超「金額」TOP 10 + 投信「零持股首買」與「連買」
     inst_top = existing_data.get("inst_top", {"foreign_buy": [], "foreign_sell": [], "trust_buy": [], "trust_sell": []})
     twse_f_amt, twse_t_amt, tpex_f_amt, tpex_t_amt = [], [], [], []
     trust_lots_map = {}
 
-    t86 = get_json(f"https://www.twse.com.tw/rwd/zh/fund/T86?date={ymd}&selectType=ALLBUT0999&response=json")
-    if t86 and t86.get("stat") == "OK" and t86.get("data"):
-        for row in t86["data"]:
-            code = str(row[0]).strip()
+    # 使用 FinMind 全市場三大法人明細（上市＋上櫃一次完整取得，避免 TPEx 欄位改版變 0.00）
+    inst_1d_df = fetch_finmind("TaiwanStockInstitutionalInvestorsBuySell", start_date=latest_date, end_date=latest_date)
+    if not inst_1d_df.empty:
+        inst_1d_df["net_lots"] = (inst_1d_df["buy"] - inst_1d_df["sell"]) / 1000.0
+        for code, grp in inst_1d_df.groupby("stock_id"):
+            code = str(code).strip()
             if code not in stocks_map:
                 continue
             st = stocks_map[code]
-            f_lots = sfloat(row[4]) / 1000.0
-            t_lots = sfloat(row[10]) / 1000.0
+            f_lots = float(grp[grp["name"].str.contains("Foreign_Investor", na=False)]["net_lots"].sum())
+            t_lots = float(grp[grp["name"] == "Investment_Trust"]["net_lots"].sum())
             f_yi = round(f_lots * 1000.0 * st["avg_p"] / 1e8, 2)
             t_yi = round(t_lots * 1000.0 * st["avg_p"] / 1e8, 2)
-            twse_f_amt.append((st["n"], f_yi))
-            twse_t_amt.append((st["n"], t_yi))
             trust_lots_map[code] = sint(t_lots)
+            if st["mkt"] == "twse":
+                twse_f_amt.append((st["n"], f_yi))
+                twse_t_amt.append((st["n"], t_yi))
+            else:
+                tpex_f_amt.append((st["n"], f_yi))
+                tpex_t_amt.append((st["n"], t_yi))
 
-    tpex_3i = get_json("https://www.tpex.org.tw/openapi/v1/tpex_3insti_daily_trading")
-    if isinstance(tpex_3i, list):
-        for item in tpex_3i:
-            code = str(item.get("SecuritiesCompanyCode", "")).strip()
-            if code not in stocks_map:
-                continue
-            st = stocks_map[code]
-            f_lots = sfloat(item.get("ForeignInvestorsDifference")) / 1000.0
-            t_lots = sfloat(item.get("InvestmentTrustDifference")) / 1000.0
-            f_yi = round(f_lots * 1000.0 * st["avg_p"] / 1e8, 2)
-            t_yi = round(t_lots * 1000.0 * st["avg_p"] / 1e8, 2)
-            tpex_f_amt.append((st["n"], f_yi))
-            tpex_t_amt.append((st["n"], t_yi))
-            trust_lots_map[code] = sint(t_lots)
-
-    if twse_f_amt:
+    if twse_f_amt and tpex_f_amt:
         def zip_top10_amt(a, b):
             return [
                 {
@@ -270,19 +266,71 @@ def main():
         inst_top["foreign_sell"] = zip_top10_amt(sorted(twse_f_amt, key=lambda x: x[1])[:10], sorted(tpex_f_amt, key=lambda x: x[1])[:10])
         inst_top["trust_buy"] = zip_top10_amt(sorted(twse_t_amt, key=lambda x: x[1], reverse=True)[:10], sorted(tpex_t_amt, key=lambda x: x[1], reverse=True)[:10])
         inst_top["trust_sell"] = zip_top10_amt(sorted(twse_t_amt, key=lambda x: x[1])[:10], sorted(tpex_t_amt, key=lambda x: x[1])[:10])
+        print(f"✅ 外資/投信上市櫃買賣超金額 TOP 10 更新完成（上櫃樣本 {len(tpex_f_amt)} 檔）")
 
+    # 投信剛買（真正定義：前一日投信持股為 0，今日首度買超 > 0 張）
     it_fresh = []
-    for code, t_lots in sorted(trust_lots_map.items(), key=lambda x: x[1] * stocks_map.get(x[0], {}).get("avg_p", 0), reverse=True):
-        if t_lots >= 50 and code in stocks_map:
+    it_streak = [x for x in existing_data.get("it_streak", []) if str(x.get("c", "")).strip().isdigit()]
+    if trust_lots_map:
+        # 抓取近 5 日投信買賣超 + 前一日投信持股比率
+        inst_5d_df = fetch_finmind("TaiwanStockInstitutionalInvestorsBuySell", start_date=recent_days[0], end_date=latest_date)
+        t_5d_df = inst_5d_df[inst_5d_df["name"] == "Investment_Trust"].copy() if not inst_5d_df.empty else pd.DataFrame()
+        if not t_5d_df.empty:
+            t_5d_df["net_lots"] = (t_5d_df["buy"] - t_5d_df["sell"]) / 1000.0
+
+        # 抓取前一日外資/投信持股表，確認投信先前持股為 0
+        sh_prev_df = fetch_finmind("TaiwanStockShareholding", start_date=prev_trade_date, end_date=prev_trade_date)
+        prev_trust_shares = {}
+        if not sh_prev_df.empty:
+            for col_cand in ["InvestmentTrustShares", "Investment_Trust_Shares"]:
+                if col_cand in sh_prev_df.columns:
+                    prev_trust_shares = dict(zip(sh_prev_df["stock_id"], sh_prev_df[col_cand]))
+                    break
+
+        fresh_candidates = []
+        streak_candidates = []
+        for code, t_lots in trust_lots_map.items():
+            if t_lots < 10 or code not in stocks_map:
+                continue
             st = stocks_map[code]
-            it_fresh.append({
+            prev_sh = sfloat(prev_trust_shares.get(code, -1))
+            # 判斷過去 4 日投信是否皆未買超 (<= 0)
+            past_zero_buy = True
+            streak_days = 1
+            if not t_5d_df.empty:
+                sub_t = t_5d_df[t_5d_df["stock_id"] == code].sort_values("date")
+                past_vals = sub_t[sub_t["date"] < latest_date]["net_lots"].tolist()
+                if any(v > 0 for v in past_vals):
+                    past_zero_buy = False
+                streak_days = 0
+                for v in reversed(sub_t["net_lots"].tolist()):
+                    if v > 0:
+                        streak_days += 1
+                    else:
+                        break
+
+            item_obj = {
                 "c": code, "n": st["n"], "p": st["p"], "chg": st["chg"],
-                "days": 1, "lots": t_lots, "hold": 0.0,
+                "days": max(streak_days, 1), "lots": t_lots, "hold": 0.0,
                 "cap_r": round(t_lots / max(st["v"], 1) * 100, 2),
-                "v": st["v"], "vr5": 1.0
-            })
-        if len(it_fresh) >= 25:
-            break
+                "v": st["v"], "vr5": 1.0,
+                "_amt": t_lots * st["avg_p"]
+            }
+
+            # 嚴格符合「過去投信持股為 0 且今日首度買超」
+            if (prev_sh == 0 or (prev_sh < 0 and past_zero_buy)) and streak_days == 1:
+                fresh_candidates.append(item_obj)
+            elif streak_days >= 2:
+                streak_candidates.append(item_obj)
+
+        it_fresh = sorted(fresh_candidates, key=lambda x: x["_amt"], reverse=True)[:25]
+        for x in it_fresh:
+            x.pop("_amt", None)
+        if streak_candidates:
+            it_streak = sorted(streak_candidates, key=lambda x: (x["days"], x["_amt"]), reverse=True)[:25]
+            for x in it_streak:
+                x.pop("_amt", None)
+        print(f"✅ 投信零持股首度買超篩選出 {len(it_fresh)} 檔")
 
     # 4. 融資融券餘額 & 當沖比率
     margin_map = {}
@@ -339,7 +387,56 @@ def main():
                 v_tot = stocks_map[code]["v"]
                 dt_map[code] = round(dt_lots / v_tot * 100, 2) if v_tot > 0 else 0.0
 
-    # 5. 籌碼篩選：逐日查詢分點明細（不帶 end_date 以符合 FinMind 限制）
+    # 5. 全市場當月漲跌幅排行（全市場 1,800+ 檔精算：今日收盤 vs 上月底最後交易日收盤）
+    m_top_liq = existing_data.get("m_top_liq", [])
+    m_bot_liq = existing_data.get("m_bot_liq", [])
+
+    cur_ym = latest_date[:7]
+    prev_ym_dates = [d for d in all_dates if d[:7] < cur_ym]
+    if prev_ym_dates:
+        prev_month_end = prev_ym_dates[-1]
+        prev_ym = prev_month_end[:7]
+        prev2_dates = [d for d in all_dates if d[:7] < prev_ym]
+        prev2_month_end = prev2_dates[-1] if prev2_dates else ""
+        prev3_ym = prev2_month_end[:7] if prev2_month_end else ""
+        prev3_dates = [d for d in all_dates if prev3_ym and d[:7] < prev3_ym]
+        prev3_month_end = prev3_dates[-1] if prev3_dates else ""
+
+        df_m0 = fetch_finmind("TaiwanStockPrice", start_date=prev_month_end, end_date=prev_month_end)
+        df_m1 = fetch_finmind("TaiwanStockPrice", start_date=prev2_month_end, end_date=prev2_month_end) if prev2_month_end else pd.DataFrame()
+        df_m2 = fetch_finmind("TaiwanStockPrice", start_date=prev3_month_end, end_date=prev3_month_end) if prev3_month_end else pd.DataFrame()
+
+        if not df_m0.empty:
+            p_m0 = dict(zip(df_m0["stock_id"], df_m0["close"]))
+            p_m1 = dict(zip(df_m1["stock_id"], df_m1["close"])) if not df_m1.empty else {}
+            p_m2 = dict(zip(df_m2["stock_id"], df_m2["close"])) if not df_m2.empty else {}
+
+            month_calc_all = []
+            for s in stocks_map.values():
+                if s["amt_yi"] < 0.5:
+                    continue
+                c0 = float(p_m0.get(s["c"], 0))
+                if c0 <= 0:
+                    continue
+                m_curr_ret = round((s["p"] - c0) / c0 * 100, 2)
+                c1 = float(p_m1.get(s["c"], 0))
+                c2 = float(p_m2.get(s["c"], 0))
+                m_prev1_ret = round((c0 - c1) / c1 * 100, 2) if c1 > 0 else 0.0
+                m_prev2_ret = round((c1 - c2) / c2 * 100, 2) if (c1 > 0 and c2 > 0) else 0.0
+                month_calc_all.append({
+                    "c": s["c"], "n": s["n"],
+                    "m_prev2": m_prev2_ret, "m_prev1": m_prev1_ret,
+                    "m_curr": m_curr_ret, "p": s["p"], "amt_yi": s["amt_yi"]
+                })
+
+            if len(month_calc_all) >= 20:
+                gainers = [x for x in month_calc_all if x["m_curr"] > 0]
+                losers = [x for x in month_calc_all if x["m_curr"] < 0]
+                m_top_liq = sorted(gainers, key=lambda x: x["m_curr"], reverse=True)[:25]
+                m_bot_liq = sorted(losers, key=lambda x: x["m_curr"])[:25]
+                print(f"✅ 全市場月漲跌幅更新完成（上月底 {prev_month_end}）：強勢 {len(m_top_liq)} 檔 / 弱勢 {len(m_bot_liq)} 檔")
+
+    # 6. 籌碼篩選：逐日查詢分點明細
     heavy_exclude = {"2330", "2317", "2454", "2412", "2308", "2382", "3045", "4904", "6505", "1301", "1303", "2002", "1216"}
     candidate_list = sorted(
         [
@@ -352,25 +449,18 @@ def main():
         reverse=True
     )
     scan_targets = candidate_list[:250]
-    print(f"📊 流動性合格共 {len(candidate_list)} 檔，本次深度分析前 {len(scan_targets)} 檔...")
-
-    # 用台玻(1802)取得最近 5 個有分點資料的交易日
-    cal_df = fetch_finmind("TaiwanStockPrice", data_id="2330", start_date=(dt_latest - timedelta(days=15)).strftime("%Y-%m-%d"), end_date=latest_date)
-    recent_days = sorted(cal_df["date"].unique().tolist())[-5:] if not cal_df.empty else [latest_date]
 
     actual_chip_date = ""
     for d_test in reversed(recent_days):
         probe_br = fetch_finmind("TaiwanStockTradingDailyReport", data_id=scan_targets[0]["c"], start_date=d_test)
         if not probe_br.empty:
             actual_chip_date = d_test
-            print(f"✅ 分點明細連線成功！FinMind 最新分點結算日: {actual_chip_date}（共 {len(probe_br)} 筆）")
+            print(f"✅ 分點明細連線成功！最新結算日: {actual_chip_date}")
             break
 
     v7_stocks = []
     if actual_chip_date:
         target_5_days = [d for d in recent_days if d <= actual_chip_date][-5:]
-        print(f"🔍 計算區間（共 {len(target_5_days)} 日）: {target_5_days}")
-
         for st in scan_targets:
             code, vol, close_p, open_p, chg_pct = st["c"], st["v"], st["p"], st["o"], st["chg"]
             p_hist = fetch_finmind("TaiwanStockPrice", data_id=code, start_date=d60_start, end_date=actual_chip_date)
@@ -389,7 +479,6 @@ def main():
             vin = 1 if (vol > 500 and vr5 >= 2.0) else 0
             pin = 1 if (vr5 >= 1.5 and close_p > open_p and d60 >= -2.0) else 0
 
-            # 逐日抓取分點明細（不傳 end_date）
             day_frames = []
             for d in target_5_days:
                 df_d = fetch_finmind("TaiwanStockTradingDailyReport", data_id=code, start_date=d)
@@ -473,25 +562,6 @@ def main():
                 "sc": sc, "adv": adv
             })
 
-    # 6. 當月漲跌幅排行
-    m_top_liq = existing_data.get("m_top_liq", [])
-    m_bot_liq = existing_data.get("m_bot_liq", [])
-    prev_m_map = {x["c"]: x for x in (m_top_liq + m_bot_liq)}
-    m_updated = []
-    for s in stocks_map.values():
-        if s["amt_yi"] >= 0.5 and s["c"] in prev_m_map and prev_m_map[s["c"]]["p"] > 0:
-            old = prev_m_map[s["c"]]
-            base_p = old["p"] / (1 + old["m_curr"] / 100.0) if (1 + old["m_curr"] / 100.0) > 0 else s["p"]
-            new_m = round((s["p"] - base_p) / base_p * 100, 2) if base_p > 0 else s["chg"]
-            m_updated.append({
-                "c": s["c"], "n": s["n"],
-                "m_prev2": old.get("m_prev2", 0.0), "m_prev1": old.get("m_prev1", 0.0),
-                "m_curr": new_m, "p": s["p"], "amt_yi": s["amt_yi"]
-            })
-    if len(m_updated) >= 15:
-        m_top_liq = sorted(m_updated, key=lambda x: x["m_curr"], reverse=True)[:25]
-        m_bot_liq = sorted(m_updated, key=lambda x: x["m_curr"])[:25]
-
     # 7. 細產業與技術突破
     sectors = existing_data.get("sectors", [])
     rev_name_map = {v["n"]: k for k, v in stocks_map.items()}
@@ -536,8 +606,8 @@ def main():
         "m_bot_liq": m_bot_liq,
         "sectors": sectors,
         "inst_top": inst_top,
-        "it_streak": existing_data.get("it_streak", []),
-        "it_fresh": it_fresh if it_fresh else existing_data.get("it_fresh", []),
+        "it_streak": it_streak,
+        "it_fresh": it_fresh,
         "sd_breakout": sd_breakout,
         "sd_vol_red": sd_vol_red,
         "sd_high3m": existing_data.get("sd_high3m", []),
