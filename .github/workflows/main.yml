@@ -31,7 +31,7 @@ jobs:
       - name: Run Cloud Spider
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
-        run: python scripts/fetch_cloud_chip_data.py
+        run: python -u scripts/fetch_cloud_chip_data.py
 
       - name: Commit and Push JSON
         run: |
