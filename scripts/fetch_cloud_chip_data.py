@@ -46,14 +46,15 @@ def fetch_finmind(dataset, data_id="", start_date="", end_date=""):
     params = {"dataset": dataset, "start_date": start_date}
     if data_id:
         params["data_id"] = data_id
-    if end_date:
+    # 券商分點日報僅支援單日查詢，不可傳入 end_date
+    if end_date and dataset != "TaiwanStockTradingDailyReport":
         params["end_date"] = end_date
     if FINMIND_TOKEN:
         params["token"] = FINMIND_TOKEN
 
     for _ in range(3):
         try:
-            resp = requests.get(FINMIND_URL, params=params, timeout=18)
+            resp = requests.get(FINMIND_URL, params=params, timeout=20)
             data = resp.json()
             if data.get("msg") == "success":
                 return pd.DataFrame(data.get("data", []))
@@ -62,15 +63,12 @@ def fetch_finmind(dataset, data_id="", start_date="", end_date=""):
                 print("⚠️ FinMind 達到每小時請求上限，暫停 60 秒...")
                 time.sleep(60)
             else:
-                print(f"  [FinMind訊息] {dataset} ({data_id}): {msg}")
                 return pd.DataFrame()
-        except Exception as e:
-            print(f"  [FinMind連線異常] {e}")
+        except Exception:
             time.sleep(2)
     return pd.DataFrame()
 
 def get_latest_twse_date():
-    # 直接從證交所每日收盤行情取得最新交易日（不依賴 FinMind）
     twse_all = get_json("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL")
     if isinstance(twse_all, list) and len(twse_all) > 0:
         raw_d = str(twse_all[0].get("Date", "")).strip()
@@ -89,12 +87,9 @@ def load_existing_json():
     return {}
 
 def main():
-    print("🚀 啟動台股多空戰情指揮中心全自動爬蟲（防卡死直連版）...")
-    print(f"🔑 Token 長度: {len(FINMIND_TOKEN)} 字元")
-
+    print("🚀 啟動台股多空戰情指揮中心全自動爬蟲（FinMind Sponsor 單日分點精準版）...")
     latest_date, twse_all = get_latest_twse_date()
     if not latest_date:
-        # 備援：從 FinMind 取得台積電最近交易日
         end_dt = datetime.now()
         start_dt = end_dt - timedelta(days=30)
         df_cal = fetch_finmind("TaiwanStockPrice", data_id="2330", start_date=start_dt.strftime("%Y-%m-%d"), end_date=end_dt.strftime("%Y-%m-%d"))
@@ -102,14 +97,13 @@ def main():
             latest_date = sorted(df_cal["date"].unique().tolist())[-1]
 
     if not latest_date:
-        print("❌ 證交所與 FinMind 皆無法取得交易日期，結束執行。")
+        print("❌ 無法取得最新交易日，結束執行。")
         return
 
     dt_latest = datetime.strptime(latest_date, "%Y-%m-%d")
-    d5_start = (dt_latest - timedelta(days=10)).strftime("%Y-%m-%d")
     d60_start = (dt_latest - timedelta(days=95)).strftime("%Y-%m-%d")
     ymd = latest_date.replace("-", "")
-    print(f"📅 確認最新交易日: {latest_date} (查詢區間: {d5_start} ~ {latest_date})")
+    print(f"📅 最新大盤交易日: {latest_date}")
 
     existing_data = load_existing_json()
     market_summary = existing_data.get("market_summary", {})
@@ -124,7 +118,7 @@ def main():
         pts_val = round(sfloat(last_row[5]), 2)
         prev_idx = idx_val - pts_val
         chg_val = round(pts_val / prev_idx * 100, 2) if prev_idx > 0 else 0.0
-        if idx_val > 0:
+        if idx_val > 0 and abs(chg_val) < 8.5:
             market_summary["twse_index"] = idx_val
             market_summary["twse_pts"] = pts_val
             market_summary["twse_chg"] = chg_val
@@ -211,8 +205,6 @@ def main():
                 }
         if tpex_amt_sum > 50:
             market_summary["tpex_amt"] = round(tpex_amt_sum, 1)
-
-    print(f"✅ 成功載入全市場收盤個股: {len(stocks_map)} 檔")
 
     tot_cnt = len(stocks_map)
     if tot_cnt > 0:
@@ -347,7 +339,7 @@ def main():
                 v_tot = stocks_map[code]["v"]
                 dt_map[code] = round(dt_lots / v_tot * 100, 2) if v_tot > 0 else 0.0
 
-    # 5. 籌碼篩選：FinMind Sponsor 全市場千張以上動能股掃描
+    # 5. 籌碼篩選：逐日查詢分點明細（不帶 end_date 以符合 FinMind 限制）
     heavy_exclude = {"2330", "2317", "2454", "2412", "2308", "2382", "3045", "4904", "6505", "1301", "1303", "2002", "1216"}
     candidate_list = sorted(
         [
@@ -359,27 +351,29 @@ def main():
         key=lambda x: x["v"],
         reverse=True
     )
-    max_scan = 700 if FINMIND_TOKEN else 80
-    scan_targets = candidate_list[:max_scan]
-    print(f"📊 流動性合格共 {len(candidate_list)} 檔，預計深度分析 {len(scan_targets)} 檔...")
+    scan_targets = candidate_list[:250]
+    print(f"📊 流動性合格共 {len(candidate_list)} 檔，本次深度分析前 {len(scan_targets)} 檔...")
 
-    broker_ready = False
-    for test_st in scan_targets[:5]:
-        probe_br = fetch_finmind("TaiwanStockTradingDailyReport", data_id=test_st["c"], start_date=latest_date, end_date=latest_date)
+    # 用台玻(1802)取得最近 5 個有分點資料的交易日
+    cal_df = fetch_finmind("TaiwanStockPrice", data_id="2330", start_date=(dt_latest - timedelta(days=15)).strftime("%Y-%m-%d"), end_date=latest_date)
+    recent_days = sorted(cal_df["date"].unique().tolist())[-5:] if not cal_df.empty else [latest_date]
+
+    actual_chip_date = ""
+    for d_test in reversed(recent_days):
+        probe_br = fetch_finmind("TaiwanStockTradingDailyReport", data_id=scan_targets[0]["c"], start_date=d_test)
         if not probe_br.empty:
-            broker_ready = True
-            print(f"✅ 分點資料驗證成功（測試標的：{test_st['c']} {test_st['n']}，共 {len(probe_br)} 筆）")
+            actual_chip_date = d_test
+            print(f"✅ 分點明細連線成功！FinMind 最新分點結算日: {actual_chip_date}（共 {len(probe_br)} 筆）")
             break
-        time.sleep(0.5)
-
-    if not broker_ready:
-        print(f"⚠️ FinMind 當日 ({latest_date}) 前 5 大活躍股皆無分點明細，保留前一日籌碼名單。")
 
     v7_stocks = []
-    if broker_ready:
+    if actual_chip_date:
+        target_5_days = [d for d in recent_days if d <= actual_chip_date][-5:]
+        print(f"🔍 計算區間（共 {len(target_5_days)} 日）: {target_5_days}")
+
         for st in scan_targets:
             code, vol, close_p, open_p, chg_pct = st["c"], st["v"], st["p"], st["o"], st["chg"]
-            p_hist = fetch_finmind("TaiwanStockPrice", data_id=code, start_date=d60_start, end_date=latest_date)
+            p_hist = fetch_finmind("TaiwanStockPrice", data_id=code, start_date=d60_start, end_date=actual_chip_date)
             ma20, high60, vr5, ma_cnt = close_p, close_p, 1.0, 1
             if not p_hist.empty and len(p_hist) >= 5:
                 p_hist = p_hist.sort_values("date")
@@ -395,18 +389,24 @@ def main():
             vin = 1 if (vol > 500 and vr5 >= 2.0) else 0
             pin = 1 if (vr5 >= 1.5 and close_p > open_p and d60 >= -2.0) else 0
 
-            br_df = fetch_finmind("TaiwanStockTradingDailyReport", data_id=code, start_date=d5_start, end_date=latest_date)
-            if br_df.empty:
+            # 逐日抓取分點明細（不傳 end_date）
+            day_frames = []
+            for d in target_5_days:
+                df_d = fetch_finmind("TaiwanStockTradingDailyReport", data_id=code, start_date=d)
+                if not df_d.empty:
+                    day_frames.append(df_d)
+            if not day_frames:
                 continue
+            br_df = pd.concat(day_frames, ignore_index=True)
             br_df["net_lots"] = (br_df["buy"] - br_df["sell"]) / 1000.0
-            br_1d = br_df[br_df["date"] == latest_date].groupby("securities_trader_id")["net_lots"].sum()
+
+            br_1d = br_df[br_df["date"] == actual_chip_date].groupby("securities_trader_id")["net_lots"].sum()
             bb1, sb1 = int((br_1d > 0).sum()), int((br_1d < 0).sum())
             bd = bb1 - sb1
             d1 = round(bd / (bb1 + sb1) * 100, 2) if (bb1 + sb1) > 0 else 0.0
 
-            recent_5_dates = sorted(br_df["date"].unique().tolist())[-5:]
             sum_diff, sum_tot, mf_5d_sum, mfd = 0, 0, 0.0, 0.0
-            for d in recent_5_dates:
+            for d in target_5_days:
                 dbr = br_df[br_df["date"] == d].groupby("securities_trader_id")["net_lots"].sum()
                 if dbr.empty:
                     continue
@@ -415,12 +415,12 @@ def main():
                 sum_tot += (bb + sb)
                 dmf = dbr[dbr > 0].nlargest(15).sum() + dbr[dbr < 0].nsmallest(15).sum()
                 mf_5d_sum += dmf
-                if d == latest_date:
+                if d == actual_chip_date:
                     mfd = dmf
             d5 = round(sum_diff / sum_tot * 100, 2) if sum_tot > 0 else 0.0
             dd = round(d1 - d5, 2)
             mf1 = round(mfd / vol * 100, 2) if vol > 0 else 0.0
-            mf5 = round(mf_5d_sum / max(vol * 5, 1) * 100, 2)
+            mf5 = round(mf_5d_sum / max(vol * len(target_5_days), 1) * 100, 2)
 
             dt1 = dt_map.get(code, 0.0)
             m1 = margin_map.get(code, {}).get("m1", 0.0)
@@ -472,9 +472,8 @@ def main():
                 "bs": bs, "sg": sg, "sit_buy": sit_buy, "sms": sms,
                 "sc": sc, "adv": adv
             })
-            time.sleep(0.03)
 
-    # 6. 當月漲跌幅排行（強勢與弱勢皆嚴格過濾 成交值 > 5,000 萬）
+    # 6. 當月漲跌幅排行
     m_top_liq = existing_data.get("m_top_liq", [])
     m_bot_liq = existing_data.get("m_bot_liq", [])
     prev_m_map = {x["c"]: x for x in (m_top_liq + m_bot_liq)}
@@ -513,8 +512,8 @@ def main():
         except Exception:
             pass
 
-    active_v7 = v7_stocks if (broker_ready and len(v7_stocks) > 0) else existing_data.get("v7_stocks", [])
-    v7_trade_date = latest_date if (broker_ready and len(v7_stocks) > 0) else existing_data.get("v7_trade_date", existing_data.get("trade_date", latest_date))
+    active_v7 = v7_stocks if len(v7_stocks) > 0 else existing_data.get("v7_stocks", [])
+    v7_trade_date = actual_chip_date if len(v7_stocks) > 0 else existing_data.get("v7_trade_date", latest_date)
 
     sd_breakout = [
         {"c": x["c"], "n": x["n"], "vol_chg": round((x["vr5"] - 1) * 100, 1), "p": x["p"], "ma5": x["p"], "amt_k": int(x["v"] * x["p"]), "ma20": x["p"]}
