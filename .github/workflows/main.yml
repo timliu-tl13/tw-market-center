@@ -2,12 +2,15 @@ name: Daily Market Command Center Update
 
 on:
   schedule:
-    # 台灣時間平日 (週一至週五) 08:00（開盤前補抓）、18:45、20:15、21:30 自動執行
-    # 對應 UTC 時間：00:00, 10:45, 12:15, 13:30
+    # 1. 下午 16:30 (UTC 08:30)：盤後驗收昨夜打黑K首選勝率並傳送 Telegram
+    - cron: '30 8 * * 1-5'
+    # 2. 晚間 19:00、21:15 (UTC 11:00, 13:15)：更新全市場最新盤後籌碼與分點
+    - cron: '0 11 * * 1-5'
+    - cron: '15 13 * * 1-5'
+    # 3. 晚間 23:00 (UTC 15:00)：推播明日「打黑K首選」名單到 Telegram
+    - cron: '0 15 * * 1-5'
+    # 4. 隔日早盤 08:00 (UTC 00:00)：最後一次核對補抓
     - cron: '0 0 * * 1-5'
-    - cron: '45 10 * * 1-5'
-    - cron: '15 12 * * 1-5'
-    - cron: '30 13 * * 1-5'
   workflow_dispatch:
 
 permissions:
@@ -33,9 +36,24 @@ jobs:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
         run: python -u scripts/fetch_cloud_chip_data.py
 
+      - name: Telegram Notification (Afternoon Verify / Night Picks)
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          HOUR_UTC=$(date -u +%H)
+          if [ "$HOUR_UTC" = "08" ]; then
+            python -u scripts/telegram_notify.py verify
+          elif [ "$HOUR_UTC" = "15" ]; then
+            python -u scripts/telegram_notify.py night
+          else
+            echo "非推播時段 (UTC $HOUR_UTC)，僅更新網站資料。"
+          fi
+
       - name: Commit and Push JSON
         run: |
           git config --local user.email "action@github.com"
-          git config --local user.name "Market Bot"
-          git add public/market_dashboard_data.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto update market data" && git push)
+          git config --local user.name "GitHub Action"
+          git add public/market_dashboard_data.json public/black_k_history.json || true
+          git commit -m "Auto-update market data & history [skip ci]" || exit 0
+          git push
