@@ -339,4 +339,749 @@ export default function App() {
                       <span className="text-xs font-semibold text-rose-300">★ 波段首選（雙引擎轉佳＋資減）</span>
                       <span className="text-xl font-bold font-mono text-rose-400">{v7Stats.wavePrime.length} 檔</span>
                     </div>
-                    <p className="text-[11px] text-slate-40
+                    <p className="text-[11px] text-slate-400 mt-1">主力與投信同步偏多且融資沉澱站穩月線</p>
+                  </button>
+
+                  <button onClick={() => setActiveTab('v7')} className="text-left p-3.5 rounded-xl bg-amber-950/30 border border-amber-500/30 hover:border-amber-400 transition">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-semibold text-amber-300">▲ 主力吸籌 ＆ 🏦 投信認養</span>
+                      <span className="text-xl font-bold font-mono text-amber-400">{v7Stats.pureGoodList.length} 檔</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">分點集中吸籌或投信連買守穩成本區</p>
+                  </button>
+
+                  <button onClick={() => setActiveTab('v7')} className="text-left p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 hover:border-emerald-400 transition">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-semibold text-emerald-300">▼ 打黑K首選 ＆ 籌碼惡化警戒</span>
+                      <span className="text-xl font-bold font-mono text-emerald-400">{v7Stats.pureBadList.length} 檔</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">惡化分數最高者優先排序，鎖定高檔轉弱股</p>
+                  </button>
+
+                  <button onClick={() => setActiveTab('sector')} className="text-left p-3.5 rounded-xl bg-sky-950/30 border border-sky-500/30 hover:border-sky-400 transition">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-semibold text-sky-300">🏆 帶量突破 ＆ 技術轉強標的</span>
+                      <span className="text-xl font-bold font-mono text-sky-400">{(data.sd_breakout || []).length} 檔</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">爆量站上多均線與 107 個細產業輪動追蹤</p>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="text-sm font-bold text-rose-300">★ 今日波段首選 ＆ 籌碼轉佳精選</h3>
+                  <button onClick={() => setActiveTab('v7')} className="text-xs text-sky-400 hover:underline">查看完整籌碼篩選 →</button>
+                </div>
+                {v7Stats.pureGoodList.length === 0 ? (
+                  <p className="py-8 text-center text-xs text-slate-400">當日無符合波段首選或主力吸籌之標的</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-slate-400 border-b border-slate-800">
+                          <th className="py-2 text-left">代號/名稱</th>
+                          <th className="py-2 text-right">收盤</th>
+                          <th className="py-2 text-right">漲幅</th>
+                          <th className="py-2 text-right">5日主力%</th>
+                          <th className="py-2 text-left pl-2">策略判讀</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60">
+                        {v7Stats.pureGoodList.slice(0, 8).map((s) => (
+                          <tr key={s.c} className="hover:bg-slate-800/40">
+                            <td className="py-2 font-medium text-slate-200">{s.c} {s.n}</td>
+                            <td className="py-2 text-right font-mono">{fmtNum(s.p)}</td>
+                            <td className={`py-2 text-right font-mono ${pctColor(s.chg)}`}>{pctSign(s.chg)}</td>
+                            <td className={`py-2 text-right font-mono ${pctColor(s.mf5)}`}>{pctSign(s.mf5)}</td>
+                            <td className="py-2 pl-2 text-amber-300">{s.dynamicAdv.split('：')[0]}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="text-sm font-bold text-amber-300">🔥 強勢細產業類股 TOP 8（今日漲幅）</h3>
+                  <button onClick={() => setActiveTab('sector')} className="text-xs text-sky-400 hover:underline">查看全部技術突破 →</button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-slate-400 border-b border-slate-800">
+                        <th className="py-2 text-left">族群</th>
+                        <th className="py-2 text-left">細產業名稱</th>
+                        <th className="py-2 text-right">日報酬</th>
+                        <th className="py-2 text-right">週報酬</th>
+                        <th className="py-2 text-right">月報酬</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {[...(data.sectors || [])].sort((a, b) => b.d - a.d).slice(0, 8).map((sec, idx) => (
+                        <tr key={idx} className="hover:bg-slate-800/40">
+                          <td className="py-2 text-slate-400">{sec.g}</td>
+                          <td className="py-2 font-medium text-slate-200">{sec.n}</td>
+                          <td className={`py-2 text-right font-mono font-semibold ${pctColor(sec.d)}`}>{pctSign(sec.d)}</td>
+                          <td className={`py-2 text-right font-mono ${pctColor(sec.w)}`}>{pctSign(sec.w)}</td>
+                          <td className={`py-2 text-right font-mono ${pctColor(sec.m)}`}>{sec.m !== null ? pctSign(sec.m) : '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* TAB 2: 籌碼篩選 */}
+        {activeTab === 'v7' && (
+          <>
+            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="px-2.5 py-1 rounded-lg bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                    籌碼發散(空)：<strong>{v7Stats.dispList.length} 檔</strong>
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                    當沖過熱(空)：<strong>{v7Stats.dtHotList.length} 檔</strong>
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-purple-500/15 text-purple-300 border border-purple-500/30">
+                    散戶追價(空)：<strong>{v7Stats.retailList.length === 0 ? '0 檔（無觸發）' : `${v7Stats.retailList.length} 檔`}</strong>
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => setShowParams(!showParams)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-500/15 text-sky-300 border border-sky-500/30 hover:bg-sky-500/25"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" /> 參數門檻設定
+                </button>
+              </div>
+
+              {showParams && (
+                <div className="mt-4 pt-4 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-4 gap-4 text-xs">
+                  <div>
+                    <label className="text-slate-400 block mb-1">籌碼發散門檻：{dispThresh}%</label>
+                    <input type="range" min="10" max="50" value={dispThresh} onChange={(e) => setDispThresh(Number(e.target.value))} className="w-full accent-rose-500" />
+                  </div>
+                  <div>
+                    <label className="text-slate-400 block mb-1">當沖過熱門檻：{dtThresh}%</label>
+                    <input type="range" min="25" max="70" value={dtThresh} onChange={(e) => setDtThresh(Number(e.target.value))} className="w-full accent-amber-500" />
+                  </div>
+                  <div>
+                    <label className="text-slate-400 block mb-1">融資使用率追價門檻：{marginThresh}%</label>
+                    <input type="range" min="10" max="50" value={marginThresh} onChange={(e) => setMarginThresh(Number(e.target.value))} className="w-full accent-purple-500" />
+                  </div>
+                  <div>
+                    <label className="text-slate-400 block mb-1">5日投信買超門檻：{fmtInt(itMinAmt)} 千</label>
+                    <input type="range" min="5000" max="100000" step="5000" value={itMinAmt} onChange={(e) => setItMinAmt(Number(e.target.value))} className="w-full accent-sky-500" />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* 多方榜單 */}
+              <div className="bg-slate-900/90 border border-rose-500/25 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-sm font-bold text-rose-400 flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4" /> 波段首選 ＆ 籌碼轉佳名單（共 {v7Stats.pureGoodList.length} 檔）
+                  </h2>
+                  <span className="text-[11px] text-slate-400">僅列達標股・無硬湊</span>
+                </div>
+                {v7Stats.pureGoodList.length === 0 ? (
+                  <div className="py-10 text-center text-xs text-slate-400">
+                    當日無符合「波段首選、主力吸籌或投信認養」條件之個股
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-slate-900">
+                        <tr className="text-slate-400 border-b border-slate-800">
+                          <th className="py-2 text-left">個股</th>
+                          <th className="py-2 text-right">收盤/漲幅</th>
+                          <th className="py-2 text-right">1日分散</th>
+                          <th className="py-2 text-right">5日主力%</th>
+                          <th className="py-2 text-right">5日投信(千)</th>
+                          <th className="py-2 text-left pl-2">實戰判讀</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60">
+                        {filterStock(v7Stats.pureGoodList).map((s) => (
+                          <tr key={s.c} className="hover:bg-slate-800/40">
+                            <td className="py-2 font-medium text-slate-200 whitespace-nowrap">{s.c} {s.n}</td>
+                            <td className="py-2 text-right font-mono whitespace-nowrap">
+                              {fmtNum(s.p)} <span className={pctColor(s.chg)}>({pctSign(s.chg)})</span>
+                            </td>
+                            <td className="py-2 text-right font-mono text-rose-300">{fmtNum(s.d1, 1)}%</td>
+                            <td className={`py-2 text-right font-mono ${pctColor(s.mf5)}`}>{pctSign(s.mf5)}</td>
+                            <td className={`py-2 text-right font-mono ${pctColor(s.it5_amt)}`}>{fmtInt(s.it5_amt)}</td>
+                            <td className="py-2 pl-2 text-[11px] text-amber-300 whitespace-nowrap">{s.dynamicAdv.split('：')[0]}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* 空方榜單：依惡化分數由高到低排序 */}
+              <div className="bg-slate-900/90 border border-emerald-500/25 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-sm font-bold text-emerald-400 flex items-center gap-2">
+                    <TrendingDown className="w-4 h-4" /> 打黑K首選 ＆ 籌碼惡化警戒（共 {v7Stats.pureBadList.length} 檔）
+                  </h2>
+                  <span className="text-[11px] text-slate-400">依惡化分數最差優先排序</span>
+                </div>
+                {v7Stats.pureBadList.length === 0 ? (
+                  <div className="py-10 text-center text-xs text-slate-400">
+                    當日無符合「打黑K首選或高檔籌碼惡化」條件之個股
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-slate-900">
+                        <tr className="text-slate-400 border-b border-slate-800">
+                          <th className="py-2 text-left">個股</th>
+                          <th className="py-2 text-right">收盤/漲幅</th>
+                          <th className="py-2 text-center">惡化分</th>
+                          <th className="py-2 text-right">1日分散</th>
+                          <th className="py-2 text-left pl-2">操作建議與警訊</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60">
+                        {filterStock(v7Stats.pureBadList).map((s) => (
+                          <tr key={s.c} className="hover:bg-slate-800/40">
+                            <td className="py-2 font-medium text-slate-200 whitespace-nowrap">{s.c} {s.n}</td>
+                            <td className="py-2 text-right font-mono whitespace-nowrap">
+                              {fmtNum(s.p)} <span className={pctColor(s.chg)}>({pctSign(s.chg)})</span>
+                            </td>
+                            <td className="py-2 text-center">
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold">{s.bs}分</span>
+                            </td>
+                            <td className="py-2 text-right font-mono text-emerald-300">{fmtNum(s.d1, 1)}%</td>
+                            <td className="py-2 pl-2">
+                              <div className="text-[11px] text-slate-200">{s.dynamicAdv.split('：')[0]}</div>
+                              <div className="flex flex-wrap gap-1 mt-0.5">
+                                {s.sd === 1 && <span className="px-1 rounded bg-rose-500/20 text-rose-300 text-[10px]">發散</span>}
+                                {s.sdt === 1 && <span className="px-1 rounded bg-amber-500/20 text-amber-300 text-[10px]">當沖熱</span>}
+                                {s.sm === 1 && <span className="px-1 rounded bg-purple-500/20 text-purple-300 text-[10px]">融資增</span>}
+                                {s.smf === 1 && <span className="px-1 rounded bg-emerald-500/20 text-emerald-300 text-[10px]">主力倒</span>}
+                                {s.sit === 1 && <span className="px-1 rounded bg-sky-500/20 text-sky-300 text-[10px]">投信賣</span>}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+                <h3 className="text-sm font-bold text-rose-300 mb-2">🚨 籌碼發散明細（買家數 &gt; 賣家數）</h3>
+                {v7Stats.dispList.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-6 text-center">當日無觸發籌碼發散之個股</p>
+                ) : (
+                  <div className="max-h-72 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-slate-900 text-slate-400 border-b border-slate-800">
+                        <tr>
+                          <th className="py-1.5 text-left">個股</th>
+                          <th className="py-1.5 text-right">家數差</th>
+                          <th className="py-1.5 text-right">1日分散</th>
+                          <th className="py-1.5 text-right">較5日增</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/50">
+                        {filterStock(v7Stats.dispList).slice(0, 20).map((s) => (
+                          <tr key={s.c}>
+                            <td className="py-1.5 text-slate-200">{s.c} {s.n}</td>
+                            <td className="py-1.5 text-right font-mono text-rose-300">+{s.bd}</td>
+                            <td className="py-1.5 text-right font-mono">{fmtNum(s.d1, 1)}%</td>
+                            <td className="py-1.5 text-right font-mono text-amber-300">+{fmtNum(s.dd, 1)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+                <h3 className="text-sm font-bold text-amber-300 mb-2">🔥 當沖過熱明細（當沖比 &gt; {dtThresh}%）</h3>
+                {v7Stats.dtHotList.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-6 text-center">當日無觸發當沖過熱之個股</p>
+                ) : (
+                  <div className="max-h-72 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-slate-900 text-slate-400 border-b border-slate-800">
+                        <tr>
+                          <th className="py-1.5 text-left">個股</th>
+                          <th className="py-1.5 text-right">漲幅</th>
+                          <th className="py-1.5 text-right">今日當沖</th>
+                          <th className="py-1.5 text-right">5日均沖</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/50">
+                        {filterStock(v7Stats.dtHotList).slice(0, 20).map((s) => (
+                          <tr key={s.c}>
+                            <td className="py-1.5 text-slate-200">{s.c} {s.n}</td>
+                            <td className={`py-1.5 text-right font-mono ${pctColor(s.chg)}`}>{pctSign(s.chg)}</td>
+                            <td className="py-1.5 text-right font-mono text-amber-300 font-semibold">{fmtNum(s.dt1, 1)}%</td>
+                            <td className="py-1.5 text-right font-mono text-slate-400">{fmtNum(s.dt5, 1)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+                <h3 className="text-sm font-bold text-purple-300 mb-2">💳 散戶追價明細（融資使用率激增）</h3>
+                {v7Stats.retailList.length === 0 ? (
+                  <div className="py-8 text-center">
+                    <span className="inline-block px-3 py-1 rounded-full bg-slate-800 text-slate-300 text-xs mb-2">
+                      當日無觸發（0 檔）
+                    </span>
+                    <p className="text-xs text-slate-500">無個股同時符合融資使用率 &gt; {marginThresh}% 且較 5 日激增</p>
+                  </div>
+                ) : (
+                  <div className="max-h-72 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-slate-900 text-slate-400 border-b border-slate-800">
+                        <tr>
+                          <th className="py-1.5 text-left">個股</th>
+                          <th className="py-1.5 text-right">使用率</th>
+                          <th className="py-1.5 text-right">5日均</th>
+                          <th className="py-1.5 text-right">資增減</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/50">
+                        {filterStock(v7Stats.retailList).map((s) => (
+                          <tr key={s.c}>
+                            <td className="py-1.5 text-slate-200">{s.c} {s.n}</td>
+                            <td className="py-1.5 text-right font-mono text-purple-300">{fmtNum(s.m1, 1)}%</td>
+                            <td className="py-1.5 text-right font-mono text-slate-400">{fmtNum(s.m5, 1)}%</td>
+                            <td className="py-1.5 text-right font-mono">{fmtInt(s.mc)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* TAB 3: 當月漲跌幅排行 */}
+        {activeTab === 'month' && (
+          <div className="space-y-4">
+            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-white">全市場當月個股漲跌幅強弱勢排行</h2>
+                <p className="text-xs text-slate-400">掃描全市場上市櫃個股，強勢與弱勢雙榜皆統一過濾日成交值 &gt; 5,000 萬</p>
+              </div>
+              <span className="px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-500/15 text-sky-300 border border-sky-500/30">
+                ✓ 雙榜統一門檻：日成交值 &gt; 5,000 萬
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="bg-slate-900/90 border border-rose-500/25 rounded-xl p-4">
+                <h3 className="text-sm font-bold text-rose-400 mb-3">🚀 本月漲幅最強勢 TOP 25（成交值 &gt; 5,000 萬）</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-slate-400 border-b border-slate-800">
+                        <th className="py-2 text-left">排名/個股</th>
+                        <th className="py-2 text-right">收盤價</th>
+                        <th className="py-2 text-right">本月漲幅</th>
+                        <th className="py-2 text-right">上月漲幅</th>
+                        <th className="py-2 text-right">前二月</th>
+                        <th className="py-2 text-right">成交值(億)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {filterStock(monthStrongList).map((s, i) => (
+                        <tr key={s.c} className="hover:bg-slate-800/40">
+                          <td className="py-2 font-medium text-slate-200">
+                            <span className="text-slate-500 font-mono mr-1.5">#{i + 1}</span>{s.c} {s.n}
+                          </td>
+                          <td className="py-2 text-right font-mono">{fmtNum(s.p)}</td>
+                          <td className={`py-2 text-right font-mono font-bold ${pctColor(s.m_curr)}`}>{pctSign(s.m_curr)}</td>
+                          <td className={`py-2 text-right font-mono ${pctColor(s.m_prev1)}`}>{pctSign(s.m_prev1)}</td>
+                          <td className={`py-2 text-right font-mono ${pctColor(s.m_prev2)}`}>{pctSign(s.m_prev2)}</td>
+                          <td className="py-2 text-right font-mono text-slate-300">{fmtNum(s.amt_yi, 2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/90 border border-emerald-500/25 rounded-xl p-4">
+                <h3 className="text-sm font-bold text-emerald-400 mb-3">📉 本月回檔最深 TOP 25（成交值 &gt; 5,000 萬）</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-slate-400 border-b border-slate-800">
+                        <th className="py-2 text-left">排名/個股</th>
+                        <th className="py-2 text-right">收盤價</th>
+                        <th className="py-2 text-right">本月跌幅</th>
+                        <th className="py-2 text-right">上月漲幅</th>
+                        <th className="py-2 text-right">前二月</th>
+                        <th className="py-2 text-right">成交值(億)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {filterStock(monthWeakList).map((s, i) => (
+                        <tr key={s.c} className="hover:bg-slate-800/40">
+                          <td className="py-2 font-medium text-slate-200">
+                            <span className="text-slate-500 font-mono mr-1.5">#{i + 1}</span>{s.c} {s.n}
+                          </td>
+                          <td className="py-2 text-right font-mono">{fmtNum(s.p)}</td>
+                          <td className={`py-2 text-right font-mono font-bold ${pctColor(s.m_curr)}`}>{pctSign(s.m_curr)}</td>
+                          <td className={`py-2 text-right font-mono ${pctColor(s.m_prev1)}`}>{pctSign(s.m_prev1)}</td>
+                          <td className={`py-2 text-right font-mono ${pctColor(s.m_prev2)}`}>{pctSign(s.m_prev2)}</td>
+                          <td className="py-2 text-right font-mono text-slate-300">{fmtNum(s.amt_yi, 2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: 法人買賣超 */}
+        {activeTab === 'inst' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+                <h3 className="text-sm font-bold text-rose-400 mb-3">🌐 外資上市櫃買超金額 TOP 10（億元）</h3>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-slate-400 border-b border-slate-800">
+                      <th className="py-1.5 text-left">#</th>
+                      <th className="py-1.5 text-left">上市買超</th>
+                      <th className="py-1.5 text-right">金額(億)</th>
+                      <th className="py-1.5 text-left pl-3">上櫃買超</th>
+                      <th className="py-1.5 text-right">金額(億)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50">
+                    {(data.inst_top?.foreign_buy || []).map((r, i) => (
+                      <tr key={i}>
+                        <td className="py-1.5 font-mono text-slate-500">{i + 1}</td>
+                        <td className="py-1.5 font-medium text-slate-200">{r.twse_n}</td>
+                        <td className="py-1.5 text-right font-mono text-rose-400">{amtSign(r.twse_v)}</td>
+                        <td className="py-1.5 font-medium text-slate-200 pl-3">{r.tpex_n}</td>
+                        <td className="py-1.5 text-right font-mono text-rose-400">{amtSign(r.tpex_v)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+                <h3 className="text-sm font-bold text-amber-400 mb-3">🏦 投信上市櫃買超金額 TOP 10（億元）</h3>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-slate-400 border-b border-slate-800">
+                      <th className="py-1.5 text-left">#</th>
+                      <th className="py-1.5 text-left">上市買超</th>
+                      <th className="py-1.5 text-right">金額(億)</th>
+                      <th className="py-1.5 text-left pl-3">上櫃買超</th>
+                      <th className="py-1.5 text-right">金額(億)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50">
+                    {(data.inst_top?.trust_buy || []).map((r, i) => (
+                      <tr key={i}>
+                        <td className="py-1.5 font-mono text-slate-500">{i + 1}</td>
+                        <td className="py-1.5 font-medium text-slate-200">{r.twse_n}</td>
+                        <td className="py-1.5 text-right font-mono text-amber-400">{amtSign(r.twse_v)}</td>
+                        <td className="py-1.5 font-medium text-slate-200 pl-3">{r.tpex_n}</td>
+                        <td className="py-1.5 text-right font-mono text-amber-400">{amtSign(r.tpex_v)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+                <h3 className="text-sm font-bold text-emerald-400 mb-3">🌐 外資上市櫃賣超金額 TOP 10（億元）</h3>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-slate-400 border-b border-slate-800">
+                      <th className="py-1.5 text-left">#</th>
+                      <th className="py-1.5 text-left">上市賣超</th>
+                      <th className="py-1.5 text-right">金額(億)</th>
+                      <th className="py-1.5 text-left pl-3">上櫃賣超</th>
+                      <th className="py-1.5 text-right">金額(億)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50">
+                    {(data.inst_top?.foreign_sell || []).map((r, i) => (
+                      <tr key={i}>
+                        <td className="py-1.5 font-mono text-slate-500">{i + 1}</td>
+                        <td className="py-1.5 font-medium text-slate-200">{r.twse_n}</td>
+                        <td className="py-1.5 text-right font-mono text-emerald-400">{amtSign(r.twse_v)}</td>
+                        <td className="py-1.5 font-medium text-slate-200 pl-3">{r.tpex_n}</td>
+                        <td className="py-1.5 text-right font-mono text-emerald-400">{amtSign(r.tpex_v)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+                <h3 className="text-sm font-bold text-emerald-400 mb-3">🏦 投信上市櫃賣超金額 TOP 10（億元）</h3>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-slate-400 border-b border-slate-800">
+                      <th className="py-1.5 text-left">#</th>
+                      <th className="py-1.5 text-left">上市賣超</th>
+                      <th className="py-1.5 text-right">金額(億)</th>
+                      <th className="py-1.5 text-left pl-3">上櫃賣超</th>
+                      <th className="py-1.5 text-right">金額(億)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50">
+                    {(data.inst_top?.trust_sell || []).map((r, i) => (
+                      <tr key={i}>
+                        <td className="py-1.5 font-mono text-slate-500">{i + 1}</td>
+                        <td className="py-1.5 font-medium text-slate-200">{r.twse_n}</td>
+                        <td className="py-1.5 text-right font-mono text-emerald-400">{amtSign(r.twse_v)}</td>
+                        <td className="py-1.5 font-medium text-slate-200 pl-3">{r.tpex_n}</td>
+                        <td className="py-1.5 text-right font-mono text-emerald-400">{amtSign(r.tpex_v)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+                <h3 className="text-sm font-bold text-amber-300 mb-3">📈 策略：投信連買認養清單</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-slate-400 border-b border-slate-800">
+                        <th className="py-2 text-left">個股</th>
+                        <th className="py-2 text-right">收盤/漲幅</th>
+                        <th className="py-2 text-center">連買天</th>
+                        <th className="py-2 text-right">買超張</th>
+                        <th className="py-2 text-right">持股%</th>
+                        <th className="py-2 text-right">投本比%</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/50">
+                      {filterStock((data.it_streak || []).filter((s) => s.c && s.c !== '代碼')).map((s) => (
+                        <tr key={s.c}>
+                          <td className="py-2 font-medium text-slate-200">{s.c} {s.n}</td>
+                          <td className="py-2 text-right font-mono">{fmtNum(s.p)} <span className={pctColor(s.chg)}>({pctSign(s.chg)})</span></td>
+                          <td className="py-2 text-center"><span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono">{s.days}日</span></td>
+                          <td className="py-2 text-right font-mono text-rose-400">+{fmtNum(s.lots, 1)}</td>
+                          <td className="py-2 text-right font-mono">{fmtNum(s.hold, 2)}%</td>
+                          <td className="py-2 text-right font-mono text-sky-300">{fmtNum(s.cap_r, 2)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+                <h3 className="text-sm font-bold text-rose-300 mb-3">🎯 策略：投信剛買（過去無持股・首度買進）</h3>
+                {filterStock(data.it_fresh || []).length === 0 ? (
+                  <p className="py-8 text-center text-xs text-slate-400">當日無「過去投信持股為 0 且今日首度買超」之個股</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-slate-400 border-b border-slate-800">
+                          <th className="py-2 text-left">個股</th>
+                          <th className="py-2 text-right">收盤/漲幅</th>
+                          <th className="py-2 text-center">連買天</th>
+                          <th className="py-2 text-right">買超張</th>
+                          <th className="py-2 text-right">占成交%</th>
+                          <th className="py-2 text-right">5日量比</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/50">
+                        {filterStock(data.it_fresh || []).map((s) => (
+                          <tr key={s.c}>
+                            <td className="py-2 font-medium text-slate-200">{s.c} {s.n}</td>
+                            <td className="py-2 text-right font-mono">{fmtNum(s.p)} <span className={pctColor(s.chg)}>({pctSign(s.chg)})</span></td>
+                            <td className="py-2 text-center"><span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 font-mono">{s.days}日</span></td>
+                            <td className="py-2 text-right font-mono text-rose-400">+{fmtNum(s.lots, 1)}</td>
+                            <td className="py-2 text-right font-mono text-sky-300">{fmtNum(s.cap_r, 2)}%</td>
+                            <td className="py-2 text-right font-mono">{fmtNum(s.vr5, 2)}x</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 5: 技術突破 */}
+        {activeTab === 'sector' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="bg-slate-900/90 border border-rose-500/25 rounded-xl p-4">
+                <h3 className="text-sm font-bold text-rose-400 mb-2">🏆 帶量突破多均線（量增 &gt; 100%）</h3>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-slate-400 border-b border-slate-800">
+                      <th className="py-1.5 text-left">個股</th>
+                      <th className="py-1.5 text-right">收盤價</th>
+                      <th className="py-1.5 text-right">量增%</th>
+                      <th className="py-1.5 text-right">成交值(萬)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50">
+                    {(data.sd_breakout || []).map((s) => (
+                      <tr key={s.c}>
+                        <td className="py-1.5 font-medium text-slate-200">{s.c} {s.n}</td>
+                        <td className="py-1.5 text-right font-mono">{fmtNum(s.p)}</td>
+                        <td className="py-1.5 text-right font-mono text-rose-400">+{fmtNum(s.vol_chg, 0)}%</td>
+                        <td className="py-1.5 text-right font-mono text-slate-300">{fmtInt(s.amt_k / 10)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="bg-slate-900/90 border border-amber-500/25 rounded-xl p-4">
+                <h3 className="text-sm font-bold text-amber-400 mb-2">🔥 量增紅K（爆量長紅表態）</h3>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-slate-400 border-b border-slate-800">
+                      <th className="py-1.5 text-left">個股</th>
+                      <th className="py-1.5 text-right">收盤價</th>
+                      <th className="py-1.5 text-right">量增%</th>
+                      <th className="py-1.5 text-right">成交張</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50">
+                    {(data.sd_vol_red || []).map((s) => (
+                      <tr key={s.c}>
+                        <td className="py-1.5 font-medium text-slate-200">{s.c} {s.n}</td>
+                        <td className="py-1.5 text-right font-mono">{fmtNum(s.p)}</td>
+                        <td className="py-1.5 text-right font-mono text-amber-400">+{fmtNum(s.vol_chg, 0)}%</td>
+                        <td className="py-1.5 text-right font-mono text-slate-300">{fmtInt(s.v)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="bg-slate-900/90 border border-purple-500/25 rounded-xl p-4">
+                <h3 className="text-sm font-bold text-purple-400 mb-2">⚡ 高券資比軋空潛力（&gt; 30%）</h3>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-slate-400 border-b border-slate-800">
+                      <th className="py-1.5 text-left">個股</th>
+                      <th className="py-1.5 text-right">券資比</th>
+                      <th className="py-1.5 text-right">當沖比</th>
+                      <th className="py-1.5 text-right">漲幅%</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50">
+                    {(data.sd_short || []).map((s) => (
+                      <tr key={s.c}>
+                        <td className="py-1.5 font-medium text-slate-200">{s.c} {s.n}</td>
+                        <td className="py-1.5 text-right font-mono text-purple-300 font-bold">{fmtNum(s.ratio, 1)}%</td>
+                        <td className="py-1.5 text-right font-mono text-slate-400">{fmtNum(s.dt * 100, 1)}%</td>
+                        <td className={`py-1.5 text-right font-mono ${pctColor(s.chg)}`}>{pctSign(s.chg)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <div>
+                  <h3 className="text-base font-bold text-white">📊 107 個自訂細產業類股強弱輪動</h3>
+                  <p className="text-xs text-slate-400">涵蓋傳產、電子上游、電子下游所有核心次產業族群</p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  {['ALL', '電子上游', '電子下游', '傳產'].map((g) => (
+                    <button
+                      key={g}
+                      onClick={() => setSectorGroup(g)}
+                      className={`px-3 py-1.5 rounded-lg border ${
+                        sectorGroup === g ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' : 'bg-slate-800 text-slate-300 border-slate-700'
+                      }`}
+                    >
+                      {g === 'ALL' ? '全部 (107)' : g}
+                    </button>
+                  ))}
+                  <select
+                    value={sectorSort}
+                    onChange={(e) => setSectorSort(e.target.value)}
+                    className="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200"
+                  >
+                    <option value="d">依日報酬排序</option>
+                    <option value="w">依週報酬排序</option>
+                    <option value="m">依月報酬排序</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 max-h-[540px] overflow-y-auto pr-1">
+                {sortedSectors.map((sec, idx) => (
+                  <div
+                    key={idx}
+                    className={`p-3 rounded-lg border ${
+                      sec.d > 0
+                        ? 'bg-rose-950/20 border-rose-500/25'
+                        : sec.d < 0
+                        ? 'bg-emerald-950/20 border-emerald-500/25'
+                        : 'bg-slate-800/40 border-slate-800'
+                    }`}
+                  >
+                    <div className="flex justify-between items-start gap-1">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">{sec.g}</span>
+                        <span className="text-sm font-bold text-slate-100">{sec.n}</span>
+                      </div>
+                      <span className={`text-sm font-bold font-mono ${pctColor(sec.d)}`}>
+                        {pctSign(sec.d)}
+                      </span>
+                    </div>
+                    <div className="mt-2 pt-1.5 border-t border-slate-800/70 flex justify-between text-[11px] text-slate-400 font-mono">
+                      <span>週 <strong className={pctColor(sec.w)}>{pctSign(sec.w)}</strong></span>
+                      <span>月 <strong className={pctColor(sec.m)}>{sec.m !== null ? pctSign(sec.m) : '-'}</strong></span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
