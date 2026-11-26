@@ -484,3 +484,72 @@ def main():
             old = prev_m_map[s["c"]]
             base_p = old["p"] / (1 + old["m_curr"] / 100.0) if (1 + old["m_curr"] / 100.0) > 0 else s["p"]
             new_m = round((s["p"] - base_p) / base_p * 100, 2) if base_p > 0 else s["chg"]
+            m_updated.append({
+                "c": s["c"], "n": s["n"],
+                "m_prev2": old.get("m_prev2", 0.0), "m_prev1": old.get("m_prev1", 0.0),
+                "m_curr": new_m, "p": s["p"], "amt_yi": s["amt_yi"]
+            })
+    if len(m_updated) >= 15:
+        m_top_liq = sorted(m_updated, key=lambda x: x["m_curr"], reverse=True)[:25]
+        m_bot_liq = sorted(m_updated, key=lambda x: x["m_curr"])[:25]
+
+    # 7. 細產業與技術突破
+    sectors = existing_data.get("sectors", [])
+    rev_name_map = {v["n"]: k for k, v in stocks_map.items()}
+    if os.path.exists(SECTOR_MAP_PATH):
+        try:
+            with open(SECTOR_MAP_PATH, "r", encoding="utf-8") as f:
+                s_map = json.load(f)
+            new_sectors = []
+            for sec in s_map:
+                rets = [stocks_map[m.get("c") or rev_name_map.get(m.get("n"), "")]["chg"]
+                        for m in sec["members"]
+                        if (m.get("c") or rev_name_map.get(m.get("n"), "")) in stocks_map]
+                if rets:
+                    avg_d = round(sum(rets) / len(rets), 2)
+                    new_sectors.append({"g": sec["g"], "n": sec["name"], "d": avg_d, "w": avg_d, "m": None, "q": None})
+            if new_sectors:
+                sectors = new_sectors
+        except Exception:
+            pass
+
+    active_v7 = v7_stocks if (broker_ready and len(v7_stocks) > 0) else existing_data.get("v7_stocks", [])
+    v7_trade_date = latest_date if (broker_ready and len(v7_stocks) > 0) else existing_data.get("v7_trade_date", existing_data.get("trade_date", latest_date))
+
+    sd_breakout = [
+        {"c": x["c"], "n": x["n"], "vol_chg": round((x["vr5"] - 1) * 100, 1), "p": x["p"], "ma5": x["p"], "amt_k": int(x["v"] * x["p"]), "ma20": x["p"]}
+        for x in active_v7 if x.get("pin") == 1
+    ][:25] or existing_data.get("sd_breakout", [])
+
+    sd_vol_red = [
+        {"c": x["c"], "n": x["n"], "v": x["v"], "vol_chg": round((x["vr5"] - 1) * 100, 1), "open": x["p"], "p": x["p"], "amt_k": int(x["v"] * x["p"])}
+        for x in active_v7 if x.get("vin") == 1 and x.get("chg", 0) > 3.0
+    ][:25] or existing_data.get("sd_vol_red", [])
+
+    payload = {
+        "updated_at": (datetime.utcnow() + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M"),
+        "trade_date": latest_date,
+        "v7_trade_date": v7_trade_date,
+        "market_summary": market_summary,
+        "v7_stocks": active_v7,
+        "m_top_all": m_top_liq,
+        "m_top_liq": m_top_liq,
+        "m_bot_liq": m_bot_liq,
+        "sectors": sectors,
+        "inst_top": inst_top,
+        "it_streak": existing_data.get("it_streak", []),
+        "it_fresh": it_fresh if it_fresh else existing_data.get("it_fresh", []),
+        "sd_breakout": sd_breakout,
+        "sd_vol_red": sd_vol_red,
+        "sd_high3m": existing_data.get("sd_high3m", []),
+        "sd_vol_drop": existing_data.get("sd_vol_drop", []),
+        "sd_short": existing_data.get("sd_short", [])
+    }
+
+    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"🎉 更新完成！大盤基準日: {latest_date} | 籌碼基準日: {v7_trade_date} | 掃描檔數: {len(active_v7)}")
+
+if __name__ == "__main__":
+    main()
