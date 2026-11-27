@@ -414,10 +414,13 @@ def main():
 
     actual_chip_date = ""
     for d_test in reversed(recent_5_days):
-        probe_br = fetch_finmind("TaiwanStockTradingDailyReport", data_id=scan_targets[0]["c"], start_date=d_test)
-        if not probe_br.empty:
-            actual_chip_date = d_test
-            print(f"✅ 分點明細連線成功！最新結算日: {actual_chip_date}")
+        for test_st in scan_targets[:8]:
+            probe_br = fetch_finmind("TaiwanStockTradingDailyReport", data_id=test_st["c"], start_date=d_test)
+            if not probe_br.empty:
+                actual_chip_date = d_test
+                print(f"✅ 分點明細連線成功！最新結算日: {actual_chip_date}（驗證標的：{test_st['c']} {test_st['n']}）")
+                break
+        if actual_chip_date:
             break
 
     v7_stocks = []
