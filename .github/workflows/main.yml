@@ -2,7 +2,7 @@ name: Daily Market Command Center Update
 
 on:
   schedule:
-    # 1. 下午 16:30 (UTC 08:30)：盤後驗收昨夜打黑K首選勝率並傳送 Telegram
+    # 1. 下午 16:30 (UTC 08:30)：盤後驗收昨夜打黑K首選成功率並傳送 Telegram
     - cron: '30 8 * * 1-5'
     # 2. 晚間 19:00、21:15 (UTC 11:00, 13:15)：更新全市場最新盤後籌碼與分點
     - cron: '0 11 * * 1-5'
@@ -38,6 +38,7 @@ jobs:
 
       - name: Telegram Notification (Afternoon Verify / Night Picks)
         env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
