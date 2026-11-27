@@ -53,7 +53,7 @@ def fetch_finmind(dataset, data_id="", start_date="", end_date=""):
 
     for _ in range(3):
         try:
-            resp = requests.get(FINMIND_URL, params=params, timeout=25)
+            resp = requests.get(FINMIND_URL, params=params, timeout=30)
             data = resp.json()
             if data.get("msg") == "success":
                 return pd.DataFrame(data.get("data", []))
@@ -67,15 +67,6 @@ def fetch_finmind(dataset, data_id="", start_date="", end_date=""):
             time.sleep(2)
     return pd.DataFrame()
 
-def get_latest_twse_date():
-    twse_all = get_json("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL")
-    if isinstance(twse_all, list) and len(twse_all) > 0:
-        raw_d = str(twse_all[0].get("Date", "")).strip()
-        if len(raw_d) == 7 and raw_d.isdigit():
-            y = int(raw_d[:3]) + 1911
-            return f"{y}-{raw_d[3:5]}-{raw_d[5:7]}", twse_all
-    return "", twse_all
-
 def load_existing_json():
     if os.path.exists(OUTPUT_PATH):
         try:
@@ -86,42 +77,111 @@ def load_existing_json():
     return {}
 
 def main():
-    print("🚀 啟動台股多空戰情指揮中心全自動爬蟲（60日投信首買＋打黑K優先版）...")
-    latest_date, twse_all = get_latest_twse_date()
-    if not latest_date:
-        end_dt = datetime.now()
-        start_dt = end_dt - timedelta(days=30)
-        df_cal = fetch_finmind("TaiwanStockPrice", data_id="2330", start_date=start_dt.strftime("%Y-%m-%d"), end_date=end_dt.strftime("%Y-%m-%d"))
-        if not df_cal.empty:
-            latest_date = sorted(df_cal["date"].unique().tolist())[-1]
+    print("🚀 啟動台股多空戰情指揮中心全自動爬蟲（FinMind Sponsor 全市場直連版）...")
+    now_tw = datetime.utcnow() + timedelta(hours=8)
+    end_str = now_tw.strftime("%Y-%m-%d")
+    start_cal_str = (now_tw - timedelta(days=120)).strftime("%Y-%m-%d")
 
-    if not latest_date:
-        print("❌ 無法取得最新交易日，結束執行。")
+    cal_df = fetch_finmind("TaiwanStockPrice", data_id="2330", start_date=start_cal_str, end_date=end_str)
+    if cal_df.empty:
+        print("❌ 無法從 FinMind 取得交易日曆，請確認 Token 狀態。")
         return
+
+    all_dates = sorted(cal_df["date"].unique().tolist())
+    latest_date = all_dates[-1]
+    prev_trade_date = all_dates[-2] if len(all_dates) >= 2 else latest_date
+    recent_5_days = all_dates[-5:]
+    recent_60_days = all_dates[-60:]
 
     dt_latest = datetime.strptime(latest_date, "%Y-%m-%d")
     d60_start = (dt_latest - timedelta(days=115)).strftime("%Y-%m-%d")
-    ymd = latest_date.replace("-", "")
-    print(f"📅 最新大盤交易日: {latest_date}")
+    print(f"📅 確認最新大盤交易日: {latest_date}（前一日: {prev_trade_date}）")
 
     existing_data = load_existing_json()
     market_summary = existing_data.get("market_summary", {})
     market_summary["trade_date"] = latest_date
 
-    # 1. 大盤加權、櫃買指數、三大法人金額
-    fmtqik = get_json(f"https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date={ymd}&response=json")
-    if fmtqik and fmtqik.get("stat") == "OK" and fmtqik.get("data"):
-        last_row = fmtqik["data"][-1]
-        amt_yi = round(sfloat(last_row[2]) / 1e8, 1)
-        idx_val = round(sfloat(last_row[4]), 2)
-        pts_val = round(sfloat(last_row[5]), 2)
+    info_df = fetch_finmind("TaiwanStockInfo")
+    name_map = {}
+    mkt_map = {}
+    if not info_df.empty:
+        for _, row in info_df.iterrows():
+            sid = str(row.get("stock_id", "")).strip()
+            if len(sid) == 4 and not sid.startswith("00"):
+                name_map[sid] = str(row.get("stock_name", sid)).strip()
+                t_type = str(row.get("type", "")).lower()
+                mkt_map[sid] = "tpex" if ("otc" in t_type or "tpex" in t_type or "櫃" in t_type) else "twse"
+
+    df_today_all = fetch_finmind("TaiwanStockPrice", start_date=latest_date, end_date=latest_date)
+    if df_today_all.empty or len(df_today_all) < 500:
+        print(f"⚠️ {latest_date} 全市場日K尚未完整結算（僅 {len(df_today_all)} 筆），保留舊資料不覆蓋。")
+        return
+
+    stocks_map = {}
+    twse_amt_sum = 0.0
+    tpex_amt_sum = 0.0
+
+    for _, row in df_today_all.iterrows():
+        code = str(row.get("stock_id", "")).strip()
+        if len(code) != 4 or code.startswith("00"):
+            continue
+        cp = sfloat(row.get("close"))
+        op = sfloat(row.get("open"))
+        spread = sfloat(row.get("spread"))
+        shares = sfloat(row.get("Trading_Volume"))
+        val_ntd = sfloat(row.get("Trading_money"))
+        if cp <= 0:
+            continue
+        vol_lots = sint(shares / 1000.0)
+        amt_yi = round(val_ntd / 1e8, 2)
+        avg_p = round(val_ntd / shares, 2) if shares > 0 else cp
+        prev_p = cp - spread
+        chg_pct = round(spread / prev_p * 100, 2) if prev_p > 0 else 0.0
+        mkt = mkt_map.get(code, "twse")
+        if mkt == "twse":
+            twse_amt_sum += amt_yi
+        else:
+            tpex_amt_sum += amt_yi
+
+        stocks_map[code] = {
+            "c": code,
+            "n": name_map.get(code, code),
+            "mkt": mkt,
+            "p": cp,
+            "o": op,
+            "avg_p": avg_p,
+            "chg": chg_pct,
+            "v": vol_lots,
+            "amt_yi": amt_yi
+        }
+
+    print(f"✅ 成功載入全市場 {latest_date} 收盤個股: {len(stocks_map)} 檔")
+
+    tot_cnt = len(stocks_map)
+    red_k = sum(1 for s in stocks_map.values() if s["p"] > s["o"])
+    black_k = sum(1 for s in stocks_map.values() if s["p"] < s["o"])
+    up_cnt = sum(1 for s in stocks_map.values() if s["chg"] > 0)
+    dn_cnt = sum(1 for s in stocks_map.values() if s["chg"] < 0)
+    market_summary["breadth"] = [
+        {"name": "個股總數", "count": tot_cnt, "pct": 100.0},
+        {"name": "當日紅K", "count": red_k, "pct": round(red_k / tot_cnt * 100, 2)},
+        {"name": "當日黑K", "count": black_k, "pct": round(black_k / tot_cnt * 100, 2)},
+        {"name": "當日上漲", "count": up_cnt, "pct": round(up_cnt / tot_cnt * 100, 2)},
+        {"name": "當日下跌", "count": dn_cnt, "pct": round(dn_cnt / tot_cnt * 100, 2)},
+    ]
+
+    taiex_df = fetch_finmind("TaiwanStockPrice", data_id="TAIEX", start_date=prev_trade_date, end_date=latest_date)
+    if not taiex_df.empty:
+        t_row = taiex_df[taiex_df["date"] == latest_date].iloc[-1]
+        idx_val = round(sfloat(t_row.get("close")), 2)
+        pts_val = round(sfloat(t_row.get("spread")), 2)
         prev_idx = idx_val - pts_val
         chg_val = round(pts_val / prev_idx * 100, 2) if prev_idx > 0 else 0.0
-        if idx_val > 0 and abs(chg_val) < 8.5:
+        if idx_val > 0:
             market_summary["twse_index"] = idx_val
             market_summary["twse_pts"] = pts_val
             market_summary["twse_chg"] = chg_val
-            market_summary["twse_amt"] = amt_yi
+            market_summary["twse_amt"] = round(twse_amt_sum, 1)
 
     yf_tpex = get_json("https://query1.finance.yahoo.com/v8/finance/chart/%5ETWOII?range=5d&interval=1d")
     try:
@@ -134,97 +194,26 @@ def main():
             market_summary["tpex_chg"] = round(t_chg / t_prev * 100, 2) if t_prev > 0 else 0.0
     except Exception:
         pass
+    if tpex_amt_sum > 50:
+        market_summary["tpex_amt"] = round(tpex_amt_sum, 1)
 
-    bfi = get_json(f"https://www.twse.com.tw/rwd/zh/fund/BFI82U?dayDate={ymd}&type=day&response=json")
-    if bfi and bfi.get("stat") == "OK" and bfi.get("data"):
+    inst_mkt_df = fetch_finmind("TaiwanStockTotalInstitutionalInvestors", start_date=latest_date, end_date=latest_date)
+    if not inst_mkt_df.empty:
         f_net, t_net, d_net = 0.0, 0.0, 0.0
-        for row in bfi["data"]:
-            label = str(row[0]).strip()
-            if "合計" in label:
-                continue
-            diff_yi = sfloat(row[3]) / 1e8
-            if "外陸資" in label or "外資" in label:
+        for _, r in inst_mkt_df.iterrows():
+            nm = str(r.get("name", ""))
+            diff_yi = (sfloat(r.get("buy")) - sfloat(r.get("sell"))) / 1e8
+            if "Foreign_Investor" in nm:
                 f_net += diff_yi
-            elif "投信" in label:
+            elif "Investment_Trust" in nm:
                 t_net += diff_yi
-            elif "自營商" in label:
+            elif "Dealer" in nm:
                 d_net += diff_yi
         market_summary["foreign_net"] = round(f_net, 2)
         market_summary["trust_net"] = round(t_net, 2)
         market_summary["dealer_net"] = round(d_net, 2)
         market_summary["inst_total"] = round(f_net + t_net + d_net, 2)
 
-    # 2. 全市場上市＋上櫃每日收盤行情
-    stocks_map = {}
-    if not isinstance(twse_all, list):
-        twse_all = get_json("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL")
-    if isinstance(twse_all, list):
-        for item in twse_all:
-            code = str(item.get("Code", "")).strip()
-            if len(code) != 4 or code.startswith("00"):
-                continue
-            cp = sfloat(item.get("ClosingPrice"))
-            op = sfloat(item.get("OpeningPrice"))
-            chg_p = sfloat(item.get("Change"))
-            shares = sfloat(item.get("TradeVolume"))
-            val_ntd = sfloat(item.get("TradeValue"))
-            vol_lots = sint(shares / 1000.0)
-            amt_yi = round(val_ntd / 1e8, 2)
-            avg_p = round(val_ntd / shares, 2) if shares > 0 else cp
-            prev_p = cp - chg_p
-            chg_pct = round(chg_p / prev_p * 100, 2) if prev_p > 0 else 0.0
-            if cp > 0:
-                stocks_map[code] = {
-                    "c": code, "n": str(item.get("Name", code)).strip(), "mkt": "twse",
-                    "p": cp, "o": op, "avg_p": avg_p, "chg": chg_pct, "v": vol_lots, "amt_yi": amt_yi
-                }
-
-    tpex_all = get_json("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes")
-    if isinstance(tpex_all, list):
-        tpex_amt_sum = 0.0
-        for item in tpex_all:
-            code = str(item.get("SecuritiesCompanyCode", "")).strip()
-            if len(code) != 4 or code.startswith("00"):
-                continue
-            cp = sfloat(item.get("Close"))
-            op = sfloat(item.get("Open"))
-            chg_p = sfloat(item.get("Change"))
-            shares = sfloat(item.get("TradingShares"))
-            val_ntd = sfloat(item.get("TransactionAmount"))
-            vol_lots = sint(shares / 1000.0)
-            amt_yi = round(val_ntd / 1e8, 2)
-            avg_p = round(val_ntd / shares, 2) if shares > 0 else cp
-            tpex_amt_sum += amt_yi
-            prev_p = cp - chg_p
-            chg_pct = round(chg_p / prev_p * 100, 2) if prev_p > 0 else 0.0
-            if cp > 0:
-                stocks_map[code] = {
-                    "c": code, "n": str(item.get("CompanyName", code)).strip(), "mkt": "tpex",
-                    "p": cp, "o": op, "avg_p": avg_p, "chg": chg_pct, "v": vol_lots, "amt_yi": amt_yi
-                }
-        if tpex_amt_sum > 50:
-            market_summary["tpex_amt"] = round(tpex_amt_sum, 1)
-
-    tot_cnt = len(stocks_map)
-    if tot_cnt > 0:
-        red_k = sum(1 for s in stocks_map.values() if s["p"] > s["o"])
-        black_k = sum(1 for s in stocks_map.values() if s["p"] < s["o"])
-        up_cnt = sum(1 for s in stocks_map.values() if s["chg"] > 0)
-        dn_cnt = sum(1 for s in stocks_map.values() if s["chg"] < 0)
-        market_summary["breadth"] = [
-            {"name": "個股總數", "count": tot_cnt, "pct": 100.0},
-            {"name": "當日紅K", "count": red_k, "pct": round(red_k / tot_cnt * 100, 2)},
-            {"name": "當日黑K", "count": black_k, "pct": round(black_k / tot_cnt * 100, 2)},
-            {"name": "當日上漲", "count": up_cnt, "pct": round(up_cnt / tot_cnt * 100, 2)},
-            {"name": "當日下跌", "count": dn_cnt, "pct": round(dn_cnt / tot_cnt * 100, 2)},
-        ]
-
-    cal_df = fetch_finmind("TaiwanStockPrice", data_id="2330", start_date=d60_start, end_date=latest_date)
-    all_dates = sorted(cal_df["date"].unique().tolist()) if not cal_df.empty else [latest_date]
-    recent_5_days = all_dates[-5:]
-    recent_60_days = all_dates[-60:]
-
-    # 3. 外資與投信上市櫃買賣超「金額」TOP 10 + 近5日投信金額 + 過去60個交易日無買超今日首度買超
     inst_top = existing_data.get("inst_top", {"foreign_buy": [], "foreign_sell": [], "trust_buy": [], "trust_sell": []})
     twse_f_amt, twse_t_amt, tpex_f_amt, tpex_t_amt = [], [], [], []
     trust_5d_amt_map = {}
@@ -274,7 +263,6 @@ def main():
         inst_top["trust_buy"] = zip_top10_amt(sorted(twse_t_amt, key=lambda x: x[1], reverse=True)[:10], sorted(tpex_t_amt, key=lambda x: x[1], reverse=True)[:10])
         inst_top["trust_sell"] = zip_top10_amt(sorted(twse_t_amt, key=lambda x: x[1])[:10], sorted(tpex_t_amt, key=lambda x: x[1])[:10])
 
-    # 投信進場（投信剛買）：過去 60 個交易日內未曾出現投信買超，今日首度買超 > 0 張
     it_fresh = []
     it_streak = [x for x in existing_data.get("it_streak", []) if str(x.get("c", "")).strip().isdigit()]
     if not inst_60d_df.empty:
@@ -324,64 +312,45 @@ def main():
             it_streak = sorted(streak_candidates, key=lambda x: (x["days"], x["_amt"]), reverse=True)[:25]
             for x in it_streak:
                 x.pop("_amt", None)
-        print(f"✅ 過去60個交易日投信首度買超篩選出 {len(it_fresh)} 檔")
 
-    # 4. 融資融券餘額 & 當沖比率
     margin_map = {}
-    margn = get_json(f"https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?date={ymd}&selectType=ALL&response=json")
-    if margn and margn.get("stat") == "OK":
-        tables = margn.get("tables", [])
-        if len(tables) >= 1 and tables[0].get("data"):
-            for r in tables[0]["data"]:
-                if "融資金額" in str(r[0]):
-                    prev_m, curr_m = sfloat(r[4]) / 1e5, sfloat(r[5]) / 1e5
-                    if curr_m > 500:
-                        market_summary["margin_bal"] = round(curr_m, 1)
-                        market_summary["margin_chg"] = round(curr_m - prev_m, 1)
-                elif "融券" in str(r[0]):
-                    curr_s, prev_s = sfloat(r[5]) / 1e4, sfloat(r[4]) / 1e4
-                    if curr_s > 0:
-                        market_summary["short_bal"] = round(curr_s, 2)
-                        market_summary["short_chg"] = round(curr_s - prev_s, 2)
-        if len(tables) >= 2 and tables[1].get("data"):
-            for r in tables[1]["data"]:
-                code = str(r[0]).strip()
-                prev_b, curr_b, lim_b = sfloat(r[5]), sfloat(r[6]), sfloat(r[7])
-                ur = round(curr_b / lim_b * 100, 2) if lim_b > 0 else 0.0
-                margin_map[code] = {"m1": ur, "mc": sint(curr_b - prev_b)}
-
-    tpex_mb = get_json("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_margin_balance")
-    if isinstance(tpex_mb, list):
-        for item in tpex_mb:
-            code = str(item.get("SecuritiesCompanyCode", "")).strip()
-            prev_b = sfloat(item.get("MarginPurchaseYesterdayBalance"))
-            curr_b = sfloat(item.get("MarginPurchaseTodayBalance"))
-            lim_b = sfloat(item.get("MarginPurchaseLimit"))
+    mg_df = fetch_finmind("TaiwanStockMarginPurchaseShortSale", start_date=latest_date, end_date=latest_date)
+    if not mg_df.empty:
+        for _, r in mg_df.iterrows():
+            code = str(r.get("stock_id", "")).strip()
+            curr_b = sfloat(r.get("MarginPurchaseTodayBalance"))
+            prev_b = sfloat(r.get("MarginPurchaseYesterdayBalance"))
+            lim_b = sfloat(r.get("MarginPurchaseLimit"))
             ur = round(curr_b / lim_b * 100, 2) if lim_b > 0 else 0.0
             margin_map[code] = {"m1": ur, "mc": sint(curr_b - prev_b)}
 
-    dt_map = {}
-    twtb4u = get_json(f"https://www.twse.com.tw/rwd/zh/dayTrading/TWTB4U?date={ymd}&response=json")
-    if twtb4u and twtb4u.get("stat") == "OK":
-        for tb in twtb4u.get("tables", []):
-            if tb.get("data") and len(tb["data"]) > 20:
-                for r in tb["data"]:
-                    code = str(r[0]).strip()
-                    if code in stocks_map:
-                        dt_lots = sfloat(r[3]) / 1000.0
-                        v_tot = stocks_map[code]["v"]
-                        dt_map[code] = round(dt_lots / v_tot * 100, 2) if v_tot > 0 else 0.0
+    mg_tot_df = fetch_finmind("TaiwanStockTotalMarginPurchaseShortSale", start_date=latest_date, end_date=latest_date)
+    if not mg_tot_df.empty:
+        for _, r in mg_tot_df.iterrows():
+            nm = str(r.get("name", ""))
+            if "MarginPurchaseMoney" in nm:
+                curr_m = sfloat(r.get("TodayBalance")) / 1e8
+                prev_m = sfloat(r.get("YesBalance")) / 1e8
+                if curr_m > 500:
+                    market_summary["margin_bal"] = round(curr_m, 1)
+                    market_summary["margin_chg"] = round(curr_m - prev_m, 1)
+            elif "ShortSale" in nm and "Money" not in nm:
+                curr_s = sfloat(r.get("TodayBalance")) / 1e4
+                prev_s = sfloat(r.get("YesBalance")) / 1e4
+                if curr_s > 0:
+                    market_summary["short_bal"] = round(curr_s, 2)
+                    market_summary["short_chg"] = round(curr_s - prev_s, 2)
 
-    tpex_dt = get_json("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_day_trading")
-    if isinstance(tpex_dt, list):
-        for item in tpex_dt:
-            code = str(item.get("SecuritiesCompanyCode", "")).strip()
+    dt_map = {}
+    dt_df = fetch_finmind("TaiwanStockDayTrading", start_date=latest_date, end_date=latest_date)
+    if not dt_df.empty:
+        for _, r in dt_df.iterrows():
+            code = str(r.get("stock_id", "")).strip()
             if code in stocks_map:
-                dt_lots = sfloat(item.get("DayTradingVolume")) / 1000.0
+                dt_lots = sfloat(r.get("Volume")) / 1000.0
                 v_tot = stocks_map[code]["v"]
                 dt_map[code] = round(dt_lots / v_tot * 100, 2) if v_tot > 0 else 0.0
 
-    # 5. 全市場當月漲跌幅排行
     m_top_liq = existing_data.get("m_top_liq", [])
     m_bot_liq = existing_data.get("m_bot_liq", [])
 
@@ -429,7 +398,6 @@ def main():
                 m_top_liq = sorted(gainers, key=lambda x: x["m_curr"], reverse=True)[:25]
                 m_bot_liq = sorted(losers, key=lambda x: x["m_curr"])[:25]
 
-    # 6. 籌碼篩選：完整掃描全市場所有「成交量 > 1,000 張且成交值 > 5,000 萬」活躍股
     heavy_exclude = {"2330", "2317", "2454", "2412", "2308", "2382", "3045", "4904", "6505", "1301", "1303", "2002", "1216"}
     candidate_list = sorted(
         [
@@ -555,7 +523,6 @@ def main():
                 "sc": sc, "adv": adv
             })
 
-    # 7. 細產業與技術突破
     sectors = existing_data.get("sectors", [])
     rev_name_map = {v["n"]: k for k, v in stocks_map.items()}
     if os.path.exists(SECTOR_MAP_PATH):
@@ -578,17 +545,6 @@ def main():
     active_v7 = v7_stocks if len(v7_stocks) > 0 else existing_data.get("v7_stocks", [])
     v7_trade_date = actual_chip_date if len(v7_stocks) > 0 else existing_data.get("v7_trade_date", latest_date)
 
-    # 保留前一日打黑K首選名單，供隔日盤後 Telegram 自動驗證勝率
-    prev_black_k_picks = existing_data.get("black_k_picks", [])
-    prev_black_k_date = existing_data.get("black_k_picks_date", "")
-    if v7_trade_date != existing_data.get("v7_trade_date", ""):
-        old_v7 = existing_data.get("v7_stocks", [])
-        prev_black_k_picks = sorted(
-            [x for x in old_v7 if x.get("bs", 0) >= 2 and x.get("chg", 0) >= -2.0],
-            key=lambda x: (-x.get("bs", 0), x.get("sc", 0))
-        )[:15]
-        prev_black_k_date = existing_data.get("v7_trade_date", "")
-
     sd_breakout = [
         {"c": x["c"], "n": x["n"], "vol_chg": round((x["vr5"] - 1) * 100, 1), "p": x["p"], "ma5": x["p"], "amt_k": int(x["v"] * x["p"]), "ma20": x["p"]}
         for x in active_v7 if x.get("pin") == 1
@@ -600,13 +556,11 @@ def main():
     ][:25] or existing_data.get("sd_vol_red", [])
 
     payload = {
-        "updated_at": (datetime.utcnow() + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M"),
+        "updated_at": now_tw.strftime("%Y-%m-%d %H:%M"),
         "trade_date": latest_date,
         "v7_trade_date": v7_trade_date,
         "market_summary": market_summary,
         "v7_stocks": active_v7,
-        "prev_black_k_date": prev_black_k_date,
-        "prev_black_k_picks": prev_black_k_picks,
         "m_top_all": m_top_liq,
         "m_top_liq": m_top_liq,
         "m_bot_liq": m_bot_liq,
@@ -626,4 +580,5 @@ def main():
         json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
     print(f"🎉 更新完成！大盤基準日: {latest_date} | 籌碼基準日: {v7_trade_date} | 掃描檔數: {len(active_v7)}")
 
-if __name__ == "__
+if __name__ == "__main__":
+    main()
