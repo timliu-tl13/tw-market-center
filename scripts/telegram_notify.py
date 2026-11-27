@@ -1,13 +1,14 @@
 import os
 import sys
 import json
+from datetime import datetime, timedelta
 import requests
-import urllib3
-
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+import pandas as pd
 
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "").strip()
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
+FINMIND_TOKEN = os.environ.get("FINMIND_TOKEN", "").strip()
+FINMIND_URL = "https://api.finmindtrade.com/api/v4/data"
 DATA_PATH = "public/market_dashboard_data.json"
 HISTORY_PATH = "public/black_k_history.json"
 
@@ -30,31 +31,48 @@ def send_telegram(text):
         print(f"❌ Telegram 發送失敗: {resp.text}")
 
 
-def get_today_ohlc():
+def get_finmind_today_ohlc():
+    """直接向 FinMind 取得最新交易日全市場開盤價、收盤價與漲跌幅"""
+    now_tw = datetime.utcnow() + timedelta(hours=8)
+    start_str = (now_tw - timedelta(days=10)).strftime("%Y-%m-%d")
+    end_str = now_tw.strftime("%Y-%m-%d")
+
+    params_cal = {"dataset": "TaiwanStockPrice", "data_id": "2330", "start_date": start_str, "end_date": end_str}
+    if FINMIND_TOKEN:
+        params_cal["token"] = FINMIND_TOKEN
+
+    latest_date = ""
+    try:
+        r_cal = requests.get(FINMIND_URL, params=params_cal, timeout=20).json()
+        if r_cal.get("msg") == "success" and r_cal.get("data"):
+            latest_date = sorted(list(set(x["date"] for x in r_cal["data"])))[-1]
+    except Exception:
+        pass
+
+    if not latest_date:
+        return "", {}
+
+    params_all = {"dataset": "TaiwanStockPrice", "start_date": latest_date, "end_date": latest_date}
+    if FINMIND_TOKEN:
+        params_all["token"] = FINMIND_TOKEN
+
     prices = {}
     try:
-        r1 = requests.get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", timeout=15, verify=False).json()
-        for item in r1:
-            c = str(item.get("Code", "")).strip()
-            prices[c] = {
-                "o": float(str(item.get("OpeningPrice", 0)).replace(",", "") or 0),
-                "c": float(str(item.get("ClosingPrice", 0)).replace(",", "") or 0),
-                "chg": str(item.get("Change", "0")).strip()
-            }
+        r_all = requests.get(FINMIND_URL, params=params_all, timeout=30).json()
+        if r_all.get("msg") == "success" and r_all.get("data"):
+            for row in r_all["data"]:
+                c = str(row.get("stock_id", "")).strip()
+                op = float(row.get("open", 0) or 0)
+                cp = float(row.get("close", 0) or 0)
+                sp = float(row.get("spread", 0) or 0)
+                prev_c = cp - sp
+                chg_pct = round(sp / prev_c * 100, 2) if prev_c > 0 else 0.0
+                if cp > 0:
+                    prices[c] = {"o": op, "c": cp, "chg": chg_pct}
     except Exception:
         pass
-    try:
-        r2 = requests.get("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes", timeout=15, verify=False).json()
-        for item in r2:
-            c = str(item.get("SecuritiesCompanyCode", "")).strip()
-            prices[c] = {
-                "o": float(str(item.get("Open", 0)).replace(",", "") or 0),
-                "c": float(str(item.get("Close", 0)).replace(",", "") or 0),
-                "chg": str(item.get("Change", "0")).strip()
-            }
-    except Exception:
-        pass
-    return prices
+
+    return latest_date, prices
 
 
 def run_night_picks():
@@ -67,13 +85,11 @@ def run_night_picks():
     chip_date = data.get("v7_trade_date", data.get("trade_date", ""))
     v7 = data.get("v7_stocks", [])
 
-    # 篩選打黑K首選（惡化分 >= 2 且未重挫 chg >= -2%），依惡化分由高到低
     prime_list = sorted(
         [s for s in v7 if s.get("bs", 0) >= 2 and s.get("chg", 0) >= -2.0],
         key=lambda x: (-x.get("bs", 0), x.get("sc", 0))
     )[:12]
 
-    # 儲存今日推薦清單到歷史紀錄檔，供隔日下午盤後核對
     history = {}
     if os.path.exists(HISTORY_PATH):
         try:
@@ -83,7 +99,6 @@ def run_night_picks():
             history = {}
 
     history[chip_date] = [{"c": s["c"], "n": s["n"], "bs": s["bs"], "prev_c": s["p"]} for s in prime_list]
-    # 僅保留最近 30 個交易日紀錄
     for old_k in sorted(history.keys())[:-30]:
         history.pop(old_k, None)
     with open(HISTORY_PATH, "w", encoding="utf-8") as f:
@@ -107,15 +122,15 @@ def run_night_picks():
         if s.get("smf"): tags.append("主力倒")
         if s.get("sit"): tags.append("投信賣")
         tag_str = "/".join(tags)
-        lines.append(f"{idx}. <b>{s['c']} {s['n']}</b>｜{s['p']} ({s['chg']:+.2f}%)\n   └ 惡化 <b>{s['bs']}分</b> [{tag_str}]")
+        lines.append(f"{idx}. <b>{s['c']} {s['n']}</b>｜收 {s['p']} ({s['chg']:+.2f}%)\n   └ 惡化 <b>{s['bs']}分</b> [{tag_str}]")
 
     lines.append("──────────────────")
-    lines.append("💡 明日下午 16:30 將自動統計本批標的收黑K勝率")
+    lines.append("💡 明日下午 16:30 將自動統計本批標的收黑K成功率")
     send_telegram("\n".join(lines))
 
 
 def run_afternoon_verify():
-    """下午 16:30：核對昨夜推播的打黑K首選今日是否收黑K（收盤 < 開盤），並統計勝率"""
+    """下午 16:30：核對篩選出的打黑K首選今日收盤價、漲跌幅，並統計 黑K數/標的數 與成功率"""
     if not os.path.exists(HISTORY_PATH):
         print("⚠️ 尚無歷史推播紀錄可驗證。")
         return
@@ -124,18 +139,19 @@ def run_afternoon_verify():
     if not history:
         return
 
-    latest_pick_date = sorted(history.keys())[-1]
-    picks = history[latest_pick_date]
+    latest_date, prices = get_finmind_today_ohlc()
+    if len(prices) < 500:
+        print("⚠️ FinMind 今日盤後報價尚未完整，稍後再驗證。")
+        return
+
+    past_dates = [d for d in sorted(history.keys()) if d < latest_date]
+    target_pick_date = past_dates[-1] if past_dates else sorted(history.keys())[-1]
+    picks = history[target_pick_date]
     if not picks:
         return
 
-    prices = get_today_ohlc()
-    if len(prices) < 500:
-        print("⚠️ 今日盤後報價尚未完整，稍後再驗證。")
-        return
-
-    win_cnt = 0
-    valid_cnt = 0
+    black_k_cnt = 0
+    total_cnt = 0
     detail_lines = []
 
     for item in picks:
@@ -145,32 +161,34 @@ def run_afternoon_verify():
         p_info = prices.get(c)
         if not p_info or p_info["o"] <= 0 or p_info["c"] <= 0:
             continue
-        valid_cnt += 1
-        op, cp = p_info["o"], p_info["c"]
-        k_diff_pct = (cp - op) / op * 100.0
-        # 收黑K判定：收盤價 < 開盤價（開高走低或開低走低）
+        total_cnt += 1
+        op, cp, chg_pct = p_info["o"], p_info["c"], p_info["chg"]
         is_black_k = cp < op
         if is_black_k:
-            win_cnt += 1
-            icon = "✅ 真黑K"
+            black_k_cnt += 1
+            icon = "🖤 黑K"
         else:
-            icon = "❌ 收紅/平"
-        detail_lines.append(f"{icon} <b>{c} {n}</b> ({bs}分)\n   └ 開 {op} → 收 {cp} (實體 {k_diff_pct:+.2f}%)")
+            icon = "❤️ 紅/平"
+        detail_lines.append(
+            f"{icon} <b>{c} {n}</b> ({bs}分)\n"
+            f"   └ 收盤 <b>{cp:.2f}</b>｜漲跌幅 <b>{chg_pct:+.2f}%</b>（開 {op:.2f}）"
+        )
 
-    if valid_cnt == 0:
+    if total_cnt == 0:
         return
 
-    win_rate = round(win_cnt / valid_cnt * 100, 1)
-    warn_note = "\n⚠️ <b>勝率低於 50%，建議調高籌碼發散或當沖門檻！</b>" if win_rate < 50 else "\n🔥 <b>策略勝率穩定，維持現行參數！</b>"
+    win_rate = round(black_k_cnt / total_cnt * 100, 1)
+    warn_note = "⚠️ 成功率低於 50%，建議調高籌碼發散或當沖門檻！" if win_rate < 50 else "🔥 成功率穩定，維持現行篩選標準！"
 
     msg = "\n".join([
-        f"📊 <b>【盤後驗收｜打黑K首選勝率統計】</b>",
-        f"🎯 追蹤名單日：<code>{latest_pick_date}</code>",
-        f"🏆 今日實戰勝率：<b>{win_cnt} / {valid_cnt} 檔（{win_rate}%）</b>",
+        f"📊 <b>【盤後驗收｜打黑K首選成功率統計】</b>",
+        f"📅 驗證交易日：<code>{latest_date}</code>（名單基準：{target_pick_date}）",
         "──────────────────",
         *detail_lines,
         "──────────────────",
-        warn_note.strip()
+        f"🎯 <b>總結：黑K數 / 標的數 ＝ {black_k_cnt} / {total_cnt} 檔</b>",
+        f"🏆 <b>當日黑K成功率：{win_rate}%</b>",
+        warn_note
     ])
     send_telegram(msg)
 
